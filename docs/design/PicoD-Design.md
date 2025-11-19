@@ -1,9 +1,9 @@
 # PicoD Design Document
 
-Author: VanderChen, Layne Peng， WangXu
+Author: VanderChen, Layne Peng, WangXu
 ## Motivation
 
-The current AgentCube sandbox implementation relies on SSH (via `ssh_client.py`) for remote code execution, file transfer, and sandbox management. While SSH offers strong authentication and encryption, it introduces several drawbacks:
+The current AgentCube sandbox implementation relies on SSH (via `ssh_client.py`) for remote code execution, and file transfer. While SSH offers strong authentication and encryption, it introduces several drawbacks:
 
 - **Protocol Overhead**: SSH requires complex handshakes, key management, and persistent sessions, which add unnecessary weight in lightweight sandbox environments.
 - **Limited Flexibility**: The rigid nature of the SSH protocol makes it difficult to implement custom authentication schemes or optimize for specialized workflows.
@@ -21,9 +21,11 @@ PicoD is designed as a **stateless daemon** that processes each gRPC request ind
 - **Single-Request Processing**: Each API call (Execute, ReadFile, WriteFile) is handled independently, without shared state.
 - **No Session Management**: No persistent connections or session tracking; every request is authenticated via metadata.
 - **Ephemeral Operation**: PicoD runs only for the lifetime of the sandbox container and does not track lifecycle events.
+
 ## Use Case
 
 PicoD enables AI agents to interact with sandboxed environments through the AgentCube SDK. The following example demonstrates a complete workflow using multiple PicoD APIs:
+
 ### Machine Learning Workflow
 
 An AI agent performs a complete machine learning workflow - uploading data, installing dependencies, training a model, and downloading results:
@@ -97,12 +99,14 @@ PicoD follows REST API best practices for simplicity and broad compatibility:
 - **Stateless**: Each request contains all necessary information
 - **Token Authentication**: Simple bearer token in Authorization header
 - **Standard HTTP Status Codes**: 200 OK, 400 Bad Request, 401 Unauthorized, 404 Not Found, 500 Internal Server Error
+
 ### Core API Endpoints
 
 1. **POST /api/execute** - Execute commands
 2. **POST /api/files** - Upload files
 3. **GET /api/files/{path}** - Download files
 4. **GET /health** - Health check endpoint
+
 ## PicoD Architecture
 
 ### High-Level Design
@@ -180,6 +184,7 @@ graph TB
     - Error handling and recovery
     - CORS support (optional)
     - Metrics collection
+
 #### 2. REST API Endpoints
   
 **Command Execution**
@@ -285,7 +290,8 @@ end
     - If valid and authorized, PicoD forwards the request to the appropriate service (Filesystem or Process).
     - The service executes the operation and returns a response.
     - PicoD sends back `200 OK` with the result.
-    - If invalid,
+    - If invalid, send back `401 Unauthorization` or `403 Forbindden`.
+
 ### Alternative Approaches Considered
 
 1. **Pre-injected Key Pairs (Cloud-Init, Environment Variables, Secret Mounts)**
@@ -306,10 +312,11 @@ end
 PicoD provides a lightweight REST API that replaces traditional SSH‑based operations with secure, stateless HTTP endpoints. The two primary capabilities are code execution and file transfer, exposed via JSON or multipart requests.
 
 ###### Code Execution
+
 - **Endpoint: POST /api/execute**
 - **Request Body (JSON):**
 
- ```
+ ```json
  {
   "command": "echo 'Hello World'",
   "timeout": 30,
@@ -321,8 +328,10 @@ PicoD provides a lightweight REST API that replaces traditional SSH‑based oper
 }
 
  ```
+
  - **Successful Response (JSON):**
-```
+
+```json
  {
   "stdout": "Hello World\n",
   "stderr": "",
@@ -342,11 +351,15 @@ PicoD provides a lightweight REST API that replaces traditional SSH‑based oper
 }
 
 ```
+
 ##### File Transfer
+
 Provides endpoints for uploading and downloading files.
 **Upload File**:
+
 - **Endpoint**: `POST /api/files`
 - **Option 1: Multipart Form Data** (recommended for binary files)
+
 ```http
 POST /api/files HTTP/1.1
 Content-Type: multipart/form-data; boundary=----WebKitFormBoundary
@@ -368,7 +381,9 @@ Content-Disposition: form-data; name="mode"
 ------WebKitFormBoundary--
 
 ```
+
 - **Option 2: JSON with Base64** (for text files or API convenience)
+
 ```json
 {
   "path": "/workspace/test.txt",
@@ -387,13 +402,17 @@ Content-Disposition: form-data; name="mode"
 ```
 
 **Download File**:
+
 - **Endpoint**: `GET /api/files/{path}`
 - **Request**:
+
 ```http
 GET /api/files/workspace/test.txt HTTP/1.1
 Authorization: Bearer <token>
 ```
+
 - **Response**:
+
 ```http
 HTTP/1.1 200 OK
 Content-Type: text/plain
@@ -405,118 +424,11 @@ Content-Disposition: attachment; filename="test.txt"
 
 For binary files, appropriate `Content-Type` is set (e.g., `application/octet-stream`, `image/png`). `Content-Disposition` is always included to ensure correct filename handling.
 
-## Python SDK Interface
 
-### PicoDClient Class
-
-The Python SDK provides a high‑level wrapper around PicoD’s REST API, making it easy to execute commands and transfer files programmatically:
-
-```python
-import requests, os, shlex, base64
-from typing import Dict, List, Optional
-
-class PicoDClient:
-    """Client for interacting with PicoD daemon via REST API"""
-    
-    def __init__(self, host: str, port: int = 8080, access_token: str):
-        """Initialize PicoD client with connection parameters"""
-        self.base_url = f"http://{host}:{port}"
-        self.headers = {
-            "Authorization": f"Bearer {access_token}",
-            "Content-Type": "application/json"
-        }
-        
-    def execute_command(self, command: str, timeout: float = 30, 
-                       working_dir: Optional[str] = None,
-                       env: Optional[Dict[str, str]] = None) -> str:
-        """Execute a command and return stdout"""
-        response = requests.post(
-            f"{self.base_url}/api/execute",
-            headers=self.headers,
-            json={
-                "command": command,
-                "timeout": timeout,
-                "working_dir": working_dir,
-                "env": env or {}
-            }
-        )
-        response.raise_for_status()
-        result = response.json()
-        if result["exit_code"] != 0:
-            raise PicoDError(f"Command failed: {result['stderr']}")
-        return result["stdout"]
-        
-    def execute_commands(self, commands: List[str]) -> Dict[str, str]:
-        """Execute multiple commands sequentially"""
-        return {cmd: self.execute_command(cmd) for cmd in commands}
-        
-    def run_code(self, language: str, code: str, timeout: float = 30) -> str:
-        """Run code snippet in specified language"""
-        if language.lower() in ["python", "py", "python3"]:
-            command = f"python3 -c {shlex.quote(code)}"
-        elif language.lower() in ["bash", "sh", "shell"]:
-            command = f"bash -c {shlex.quote(code)}"
-        else:
-            raise ValueError(f"Unsupported language: {language}")
-        return self.execute_command(command, timeout)
-        
-    def write_file(self, content: str, remote_path: str, mode: Optional[str] = None) -> None:
-        """Write content to remote file (JSON/base64)"""
-        content_b64 = base64.b64encode(content.encode()).decode()
-        response = requests.put(
-            f"{self.base_url}/api/files/{remote_path}",
-            headers=self.headers,
-            json={
-                "content": content_b64,
-                "mode": mode or "0644"
-            }
-        )
-        response.raise_for_status()
-        
-    def upload_file(self, local_path: str, remote_path: str, mode: Optional[str] = None) -> None:
-        """Upload local file to remote server (multipart/form-data)"""
-        with open(local_path, 'rb') as f:
-            files = {'file': f}
-            data = {'path': remote_path}
-            if mode:
-                data['mode'] = mode
-            headers = {"Authorization": self.headers["Authorization"]}
-            response = requests.post(
-                f"{self.base_url}/api/files",
-                headers=headers,
-                files=files,
-                data=data
-            )
-            response.raise_for_status()
-        
-    def download_file(self, remote_path: str, local_path: str) -> None:
-        """Download remote file to local path"""
-        response = requests.get(
-            f"{self.base_url}/api/files/{remote_path}",
-            headers={"Authorization": self.headers["Authorization"]},
-            stream=True
-        )
-        response.raise_for_status()
-        
-        os.makedirs(os.path.dirname(local_path) or '.', exist_ok=True)
-        with open(local_path, 'wb') as f:
-            for chunk in response.iter_content(chunk_size=8192):
-                f.write(chunk)
-    
-    def health_check(self) -> Dict:
-        """Check server health"""
-        response = requests.get(f"{self.base_url}/health")
-        response.raise_for_status()
-        return response.json()
-
-class PicoDError(Exception):
-    """Custom exception for PicoD client errors"""
-    pass
-
-```
 ## Contribute to AgentCube
 
 ### Client Side
+
 The client side of AgentCube provides the SDK and utilities that developers use to interact with sandbox environments. This layer abstracts away the complexity of sandbox lifecycle management, command execution, and file transfer, offering a clean Python interface.
 
 #### Current Structure
@@ -674,27 +586,33 @@ classDiagram
     SandboxClient --> Sandbox : manages
 
 ```
+
 ## Security Considerations
 
 Because PicoD runs as a daemon inside sandbox environments, security is a critical design priority. The following measures ensure that execution and file operations remain isolated, authenticated, and controlled.
 
 **Token Management**  
+
 - JWT required for all requests  
 - Short-lived tokens validated via JWKS  
 - Stateless, no token storage  
 
 **File Access Control**  
+
 - Path sanitization prevents directory traversal  
 - Restricted to sandbox workspace only  
 - Enforced by OS-level permissions  
 
 **Logging & Auditing**  
+
 - Centralized logging and audit handled by AgentCube APIServer  
 
 **Update & Patch Management**  
+
 - Minimal attack surface  
 - Immutable, signed builds  
 - Regular updates recommended
+
 ## Future Enhancements
 
 PicoD is designed with extensibility in mind. Potential improvements include:
@@ -714,9 +632,6 @@ PicoD is designed with extensibility in mind. Potential improvements include:
 5. **Plugin System**  
    Custom handlers for domain-specific operations, enabling extensibility.
 
-6. **TLS/mTLS**  
-   Encrypted communication with optional mutual TLS for production deployments.
-
 ## Conclusion
 
 PicoD offers a lightweight, efficient alternative to SSH for sandbox management in AgentCube. By using RESTful HTTP APIs with JSON payloads and token-based authentication, it reduces resource overhead while maintaining strong security and functionality. The design emphasizes:
@@ -724,6 +639,5 @@ PicoD offers a lightweight, efficient alternative to SSH for sandbox management 
 - **Easy Integration**: Works with any HTTP client (curl, Postman, requests, axios, etc.)  
 - **Human Readability**: JSON responses are simple to debug and understand  
 - **Broad Compatibility**: Accessible from browsers, mobile apps, and all programming languages  
-- **Straightforward Testing**: No need for specialized tools like grpcurl  
 
 This approach ensures seamless integration with AgentCube infrastructure and provides a clear migration path from the current SSH-based implementation, enabling secure, scalable, and future-ready sandbox operations.
