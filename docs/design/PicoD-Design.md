@@ -1,6 +1,6 @@
 # PicoD Design Document
 
-Author: VanderChen, Layne Peng
+Author: VanderChen, Layne Peng， WangXu
 ## Motivation
 
 The current AgentCube sandbox implementation relies on SSH (via `ssh_client.py`) for remote code execution, file transfer, and sandbox management. While SSH offers strong authentication and encryption, it introduces several drawbacks:
@@ -170,7 +170,7 @@ graph TB
   
 ### Component Breakdown
 
-#### 1. #### HTTP Server Layer (Go Implementation)
+#### 1. HTTP Server Layer (Go Implementation)
 
 - **Framework**: Gin (lightweight HTTP web framework)
 - **Port**: Configurable (default: 9527)
@@ -580,7 +580,7 @@ classDiagram
     CodeInterpreterClient --|> Sandbox : inherits
     SandboxClient --> Sandbox : uses
     CodeInterpreterClient --> SandboxClient : uses
-    CodeInterpreterClient --> SandboxSSHClient : uses
+    CodeInterpreterClient --> SandboxSSHClient : backend
     SandboxSSHClient --> SandboxClient : uses
 
     %% Constants and utilities
