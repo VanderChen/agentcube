@@ -1,37 +1,35 @@
 # PicoD Design Document
 
-Author: VanderChen
-
+Author: VanderChen, Layne Peng
 ## Motivation
 
-The current AgentCube sandbox implementation relies on SSH (via `ssh_client.py`) for remote code execution, file transfer, and sandbox management. While SSH provides robust authentication and encryption, it introduces several challenges:
+The current AgentCube sandbox implementation relies on SSH (via `ssh_client.py`) for remote code execution, file transfer, and sandbox management. While SSH offers strong authentication and encryption, it introduces several drawbacks:
 
-1. **Heavyweight Protocol**: SSH requires complex handshake procedures, key management, and session overhead
-2. **Limited Customization**: SSH protocol constraints make it difficult to implement custom authentication schemes or optimize for specific use cases
+- **Protocol Overhead**: SSH requires complex handshakes, key management, and persistent sessions, which add unnecessary weight in lightweight sandbox environments.
+- **Limited Flexibility**: The rigid nature of the SSH protocol makes it difficult to implement custom authentication schemes or optimize for specialized workflows.
 
-To address these limitations, we propose **PicoD** (Pico Daemon) - a lightweight, HTTP-based service daemon that provides essential sandbox capabilities with minimal overhead while maintaining security through token-based authentication.
+To overcome these limitations, we propose **PicoD** (Pico Daemon) — a lightweight, HTTP/gRPC-based service daemon. PicoD delivers essential sandbox capabilities with minimal overhead, while maintaining security through simple, token-based authentication.
 
 ### Design Goals
 
-PicoD is designed as a **stateless daemon** that processes individual gRPC requests independently:
+PicoD is designed as a **stateless daemon** that processes each gRPC request independently. Its guiding principles are:
 
-- **Lightweight**: Minimal resource footprint suitable for containerized sandbox environments
-- **Simple Protocol**: Pure gRPC/protobuf-based APIs that are easy to integrate and debug
-- **Secure**: Token-based authentication without preset user requirements
-- **No Lifecycle Management**: PicoD does not manage sandbox lifecycle (creation, deletion, monitoring). These responsibilities belong to the AgentCube control plane.
-- **Single Request Processing**: Each gRPC call (Execute, ReadFile, WriteFile) is handled independently without maintaining state between requests.
-- **No Session Management**: No persistent connections or session state. Each request is authenticated via token in metadata.
-- **Ephemeral Process**: PicoD runs for the lifetime of the sandbox container but does not track or manage the sandbox's lifecycle events.
-
+- **Lightweight**: Minimal resource footprint, optimized for containerized sandbox environments.
+- **Simple Protocol:** RESTful HTTP APIs with JSON payloads that are easy to integrate, debug, and test
+- **Secure**: Token-based authentication, eliminating the need for preconfigured users or SSH keys.
+- **No Lifecycle Management**: Sandbox lifecycle (creation, deletion, monitoring) remains the responsibility of the AgentCube control plane. PicoD focuses solely on request handling.
+- **Single-Request Processing**: Each API call (Execute, ReadFile, WriteFile) is handled independently, without shared state.
+- **No Session Management**: No persistent connections or session tracking; every request is authenticated via metadata.
+- **Ephemeral Operation**: PicoD runs only for the lifetime of the sandbox container and does not track lifecycle events.
 ## Use Case
 
 PicoD enables AI agents to interact with sandboxed environments through the AgentCube SDK. The following example demonstrates a complete workflow using multiple PicoD APIs:
-
 ### Machine Learning Workflow
 
 An AI agent performs a complete machine learning workflow - uploading data, installing dependencies, training a model, and downloading results:
 
 ```python
+
 from agentcube import Sandbox
 
 # Create a sandbox instance
@@ -75,56 +73,62 @@ sandbox.download_file(
 )
 
 print("Workflow completed successfully!")
+
 ```
 
 **API Calls Flow**:
 
-1. **WriteFile (gRPC)**: Upload requirements.txt via client streaming
-2. **Execute (gRPC)**: Install dependencies via pip command
-3. **WriteFile (gRPC)**: Upload training data CSV file via client streaming
-4. **Execute (gRPC)**: Run Python training code that processes data and trains model
-5. **ReadFile (gRPC)**: Download trained model via server streaming
+1. **POST /api/files**: Upload requirements.txt via multipart/form-data or JSON base64
+2. **POST /api/execute**: Install dependencies via pip command
+3. **POST /api/files**: Upload training data CSV file
+4. **POST /api/execute**: Run Python training code that processes data and trains model
+5. **GET /api/files/{path}**: Download trained model
 
-All operations use the same gRPC connection with token authentication in metadata.
+All operations use standard HTTP requests with token authentication in Authorization header.
 
-## Reference Implementation: envd
+## Design Principles
 
-PicoD's design is heavily inspired by **envd** (Environment Daemon) from E2B, which successfully demonstrates a lightweight daemon approach for sandbox management. Key learnings from envd:
+PicoD follows REST API best practices for simplicity and broad compatibility:
 
 ### Architecture Patterns
 
-- **Pure gRPC**: All operations use gRPC/protobuf for consistency and performance
-- **Connect Protocol**: Uses ConnectRPC for efficient bidirectional streaming
-- **Modular Services**: Separate service layers for filesystem, process management, and system operations
-- **Token Authentication**: Simple token-based auth in gRPC metadata
+- **RESTful Design**: Resource-oriented architecture with standard HTTP methods
+- **JSON Payloads**: Human-readable request/response format
+- **Stateless**: Each request contains all necessary information
+- **Token Authentication**: Simple bearer token in Authorization header
+- **Standard HTTP Status Codes**: 200 OK, 400 Bad Request, 401 Unauthorized, 404 Not Found, 500 Internal Server Error
+### Core API Endpoints
 
-### Core Services (simplified from envd)
-1. **Filesystem Service** (read file, write file)
-2. **Process Service** (execute command)
-
+1. **POST /api/execute** - Execute commands
+2. **POST /api/files** - Upload files
+3. **GET /api/files/{path}** - Download files
+4. **GET /health** - Health check endpoint
 ## PicoD Architecture
 
 ### High-Level Design
 
 #### System Architecture
+  
 
 ```mermaid
 graph TB
     subgraph Client["AgentCube SDK (Python)"]
-        SDK[SDK Client]
+        SDK[SDK Client<br/>requests library]
     end
     
     subgraph PicoD["PicoD Daemon (Go)"]
-        subgraph Server["gRPC Server Layer"]
-            GRPCServer[ConnectRPC Server<br/>Port: 49983]
-            AuthInterceptor[Auth Interceptor]
-            LogInterceptor[Logging Interceptor]
-            ErrorInterceptor[Error Handler]
+        subgraph Server["HTTP Server Layer"]
+            HTTPServer[HTTP Server<br/>Port: 9527]
+            AuthMiddleware[Auth Middleware]
+            LogMiddleware[Logging Middleware]
+            ErrorMiddleware[Error Handler]
         end
         
-        subgraph Services["Service Layer"]
-            FilesystemSvc[FilesystemService<br/>- ReadFile<br/>- WriteFile]
-            ProcessSvc[ProcessService<br/>- Execute]
+        subgraph Handlers["HTTP Handlers"]
+            ExecuteHandler[POST /api/execute]
+            UploadHandler[POST /api/files]
+            DownloadHandler[GET /api/files/*]
+            HealthHandler[GET /health]
         end
         
         subgraph Logic["Business Logic"]
@@ -138,321 +142,588 @@ graph TB
         end
     end
     
-    SDK -->|gRPC + Token| GRPCServer
-    GRPCServer --> AuthInterceptor
-    AuthInterceptor --> LogInterceptor
-    LogInterceptor --> ErrorInterceptor
-    ErrorInterceptor --> FilesystemSvc
-    ErrorInterceptor --> ProcessSvc
-    FilesystemSvc --> FileOps
-    ProcessSvc --> CmdExec
+    SDK -->|HTTP + Bearer Token| HTTPServer
+    HTTPServer --> AuthMiddleware
+    AuthMiddleware --> LogMiddleware
+    LogMiddleware --> ErrorMiddleware
+    ErrorMiddleware --> ExecuteHandler
+    ErrorMiddleware --> UploadHandler
+    ErrorMiddleware --> DownloadHandler
+    ErrorMiddleware --> HealthHandler
+    ExecuteHandler --> CmdExec
+    UploadHandler --> FileOps
+    DownloadHandler --> FileOps
     FileOps --> Filesystem
     CmdExec --> OSProcess
     
     style SDK fill:#e1f5ff
-    style GRPCServer fill:#fff4e1
-    style FilesystemSvc fill:#e8f5e9
-    style ProcessSvc fill:#e8f5e9
+    style HTTPServer fill:#fff4e1
+    style ExecuteHandler fill:#e8f5e9
+    style UploadHandler fill:#e8f5e9
+    style DownloadHandler fill:#e8f5e9
     style FileOps fill:#f3e5f5
     style CmdExec fill:#f3e5f5
     style OSProcess fill:#fce4ec
     style Filesystem fill:#fce4ec
+
 ```
-
-#### Authentication Flow
-
-```mermaid
-sequenceDiagram
-    participant Client as AgentCube SDK
-    participant Auth as Auth Interceptor
-    participant Service as gRPC Service
-    participant System as System Layer
-    
-    Client->>Auth: gRPC Request<br/>[Authorization: Bearer <token>]
-    
-    alt Token Valid
-        Auth->>Auth: Validate Token
-        Auth->>Service: Forward Request
-        Service->>System: Execute Operation
-        System-->>Service: Result
-        Service-->>Auth: Response
-        Auth-->>Client: Success Response
-    else Token Invalid/Missing
-        Auth-->>Client: Error: Unauthenticated
-    end
-```
-
+  
 ### Component Breakdown
 
-#### 1. gRPC Server Layer (Go Implementation)
-- **Framework**: ConnectRPC (efficient, HTTP/2-based gRPC)
-- **Port**: Configurable (default: 49983, matching envd)
-- **Interceptor Stack**:
-  - Token authentication interceptor
-  - Request ID generation and logging
-  - Error handling and recovery
-  - Metrics collection
+#### 1. #### HTTP Server Layer (Go Implementation)
 
-#### 2. gRPC Services (Protobuf Definitions)
+- **Framework**: Gin (lightweight HTTP web framework)
+- **Port**: Configurable (default: 9527)
+- **Middleware Stack**:
+    - Token authentication middleware
+    - Request ID generation and logging
+    - Error handling and recovery
+    - CORS support (optional)
+    - Metrics collection
+#### 2. REST API Endpoints
+  
+**Command Execution**
 
-**FilesystemService**
-- `ReadFile(path) → stream bytes`: Download file content (replaces `download_file()`)
-- `WriteFile(path, stream bytes) → void`: Upload file content (replaces `write_file()` and `upload_file()`)
+- `POST /api/execute` - Execute command and return output (replaces `execute_command()`)
+    - Request: JSON with command, timeout, env vars
+    - Response: JSON with stdout, stderr, exit_code
 
-**ProcessService**
-- `Execute(cmd, timeout) → ExecuteResponse`: Execute command and return output (replaces `execute_command()`)
+**File Operations**
+
+- `POST /api/files` - Upload file (replaces `write_file()` and `upload_file()`)
+    - Request: multipart/form-data or JSON with base64 content
+    - Response: JSON with file info
+- `GET /api/files/{path}` - Download file (replaces `download_file()`)
+    - Request: File path in URL
+    - Response: File content with appropriate Content-Type
+
+**Health Check**
+
+- `GET /health` - Server health status
+    - Response: JSON with status and uptime
 
 #### 3. Authentication & Authorization
 
-**Token-Based Authentication**
+To ensure secure communication between clients and PicoD, we adopt a JWT + JWKS-based authentication model. This approach eliminates the need for pre-injecting keys into warm sandboxes, which is incompatible with the warm pool strategy used by AgentCube.
 
-PicoD is a **stateless daemon** that handles individual gRPC requests without managing sandbox lifecycle. It uses a simple token-based authentication mechanism where the access token is passed in gRPC metadata and validated by an interceptor for each request.
+- **JWT (JSON Web Token):** Clients sign requests with a short-lived JWT using their private key.
 
-**Token Source Options for Sandbox Environments**
+- **JWKS (JSON Web Key Set):** PicoD validates the JWT signature against public keys published at a JWKS URL configured in each sandbox.
 
-When PicoD runs inside a sandbox container, the access token must be securely provided at startup. Several options are available depending on the deployment environment:
+- **Authorization:** Claims within the JWT (e.g., sub, aud, scope) determine which operations the client is permitted to perform.
 
-##### Option 1: Kubernetes Secret Mount (Recommended for K8s)
-Mount the token as a file via Kubernetes Secret:
+This design ensures that pre-heated sandboxes can securely accept requests from dynamically assigned clients without requiring pre-injected secrets.
 
-```yaml
-apiVersion: v1
-kind: Pod
-metadata:
-  name: sandbox-pod
-spec:
-  containers:
-  - name: picod
-    image: picod:latest
-    env:
-    - name: PICOD_ACCESS_TOKEN_FILE
-      value: /var/run/secrets/picod/token
-    volumeMounts:
-    - name: picod-token
-      mountPath: /var/run/secrets/picod
-      readOnly: true
-  volumes:
-  - name: picod-token
-    secret:
-      secretName: picod-access-token
+```mermaid
+sequenceDiagram
+participant Client as AgentCube Client
+participant APIServer as AgentCube API Server
+participant JWKS as JWKS Endpoint
+participant PicoD as PicoD (Auth Middleware)
+participant Service as PicoD Services
+
+Client->>APIServer: Authenticate with Kubernetes token
+APIServer-->>Client: Issue JWT (signed with private key)
+Client->>PicoD: HTTP Request<br/>Authorization: Bearer JWT
+PicoD->>PicoD: Parse JWT header (alg, kid)
+alt Key cached
+PicoD->>PicoD: Load JWK by kid
+else Key not cached
+PicoD->>JWKS: Fetch JWKS
+JWKS-->>PicoD: JWKS (public keys)
+PicoD->>PicoD: Select JWK by kid
+end
+PicoD->>PicoD: Verify signature + validate claims
+alt Valid & Authorized
+PicoD->>Service: Execute/Filesystem operation
+Service-->>PicoD: Response
+PicoD-->>Client: 200 OK
+else Invalid/Unauthorized
+PicoD-->>Client: 401 Unauthorized / 403 Forbidden
+end
+
 ```
 
-**Advantages**:
-- Native Kubernetes integration
-- Automatic secret rotation support
-- Secure storage in etcd
-- RBAC-controlled access
+- **Client Authentication with API Server**
+    
+    - The client first authenticates against the AgentCube API Server using its Kubernetes token.
+    - The API Server issues a JWT signed with the client’s private key.
+        
+- **Client Request to PicoD**
+    
+    - The client sends an HTTP request to PicoD with the JWT in the `Authorization: Bearer <JWT>` header.
+    - The request targets one of PicoD’s REST endpoints (`/api/execute`, `/api/files`, etc.).
+        
+- **JWT Parsing in PicoD**
+    
+    - PicoD extracts the JWT header and claims.
+    - The `kid` (Key ID) is used to identify which public key should be used for verification.
+        
+- **JWKS Lookup**
+    
+    - PicoD checks its local JWKS cache for the key.
+    - If not found, PicoD fetches the JWKS document from the configured JWKS URL.
+    - The JWKS contains one or more public keys; PicoD selects the correct one based on `kid`.
+        
+- **Signature Verification & Claim Validation**
+    
+    - PicoD verifies the JWT signature using the selected public key.
+    - Claims are validated:
+        - `iss` must match the trusted API Server.
+        - `aud` must equal `picod`.
+        - `exp` and `iat` must be valid.
+        - `jti` checked for replay protection.
+            
+- **Authorization Enforcement**
+    
+    - PicoD inspects claims like `scope` or `roles` to determine allowed operations.
+    - Example: `scope=execute` permits `/api/execute`; `scope=files:read` permits file downloads.
+    - If claims don’t authorize the request, PicoD returns `403 Forbidden`.
+        
+- **Response Handling**
+    
+    - If valid and authorized, PicoD forwards the request to the appropriate service (Filesystem or Process).
+    - The service executes the operation and returns a response.
+    - PicoD sends back `200 OK` with the result.
+    - If invalid,
+### Alternative Approaches Considered
 
-**Implementation**: PicoD reads token from file specified by `PICOD_ACCESS_TOKEN_FILE` environment variable.
-
-##### Option 2: Cloud-Init Injection
-Inject token via cloud-init user-data for VM-based sandboxes:
-
-```yaml
-#cloud-config
-write_files:
-  - path: /etc/picod/token
-    permissions: '0600'
-    owner: root:root
-    content: |
-      ${PICOD_ACCESS_TOKEN}
-
-runcmd:
-  - export PICOD_ACCESS_TOKEN=$(cat /etc/picod/token)
-  - /usr/local/bin/picod --port 49983
-```
-
-**Advantages**:
-- Works with VM-based sandboxes (Firecracker, QEMU)
-- Token available before any services start
-- No external dependencies
-
-**Use Case**: Suitable for microVM environments where Kubernetes is not available.
-
-##### Option 3: Environment Variable (Simple Deployment)
-Pass token directly as environment variable:
-
-```bash
-docker run -e PICOD_ACCESS_TOKEN=<token> picod:latest
-```
-
-**Advantages**:
-- Simplest configuration
-- Works with any container runtime
-- No file system dependencies
-
-**Disadvantages**:
-- Token visible in process list
-- Less secure for production environments
-
-**Use Case**: Development, testing, or trusted environments.
-
-##### Option 4: Instance Metadata Service (Cloud Provider)
-Fetch token from cloud provider metadata service:
-
-```go
-// PicoD startup code
-token, err := fetchTokenFromMetadata("http://169.254.169.254/latest/meta-data/picod-token")
-```
-
-**Advantages**:
-- No secrets in container image or config
-- Cloud-native approach
-- Automatic credential management
-
-**Use Case**: Cloud-hosted sandbox environments with instance metadata support.
-
-**Token Configuration Priority**
-
-PicoD checks token sources in the following order:
-1. `--access-token` command-line flag (highest priority)
-2. `PICOD_ACCESS_TOKEN` environment variable
-3. `PICOD_ACCESS_TOKEN_FILE` environment variable (reads from file)
-4. `/etc/picod/token` default file location
-5. Instance metadata service (if configured)
-
-**Token Validation**
-
-All gRPC requests must include the token in metadata:
-```
-Authorization: Bearer <access_token>
-```
-
-The auth interceptor validates the token on every request. Since PicoD is stateless, there is no session management or token caching beyond the initial startup configuration.
-
+1. **Pre-injected Key Pairs (Cloud-Init, Environment Variables, Secret Mounts)**
+    
+    - **Pros:** Simple to implement; widely used in VM/container setups.
+    - **Cons:** Incompatible with warm pools (keys must be injected before sandbox assignment); insecure if environment variables are exposed; poor rotation support.
+        
+2. **Static Shared Secret (Environment Variable or Config File)**
+    
+    - **Pros:** Very simple; no external dependency.
+    - **Cons:** Weak security; no rotation; risk of leakage; unsuitable for multi-tenant environments.
+        
+3. **Mutual TLS (mTLS)**
+    
+    - **Pros:** Strong authentication; proven in production.
+    - **Cons:** Requires certificate distribution and management; heavy for lightweight sandboxes; not flexible for dynamic warm pools.
 #### 4. Core Capabilities
+PicoD provides a lightweight REST API that replaces traditional SSH‑based operations with secure, stateless HTTP endpoints. The two primary capabilities are code execution and file transfer, exposed via JSON or multipart requests.
 
-##### Code Execution
-Replaces SSH's `exec_command()`:
+###### Code Execution
+- **Endpoint: POST /api/execute**
+- **Request Body (JSON):**
 
-```protobuf
-// Simple unary RPC for command execution
-rpc Execute(ExecuteRequest) returns (ExecuteResponse);
-
-message ExecuteRequest {
-    string command = 1;          // Full command string to execute
-    optional float timeout = 2;  // Execution timeout in seconds (default: 30)
+ ```
+ {
+  "command": "echo 'Hello World'",
+  "timeout": 30,
+  "working_dir": "/workspace",
+  "env": {
+    "VAR1": "value1",
+    "VAR2": "value2"
+  }
 }
 
-message ExecuteResponse {
-    string stdout = 1;           // Command stdout
-    string stderr = 2;           // Command stderr
-    int32 exit_code = 3;         // Exit code
-}
+ ```
+ - **Successful Response (JSON):**
 ```
+ {
+  "stdout": "Hello World\n",
+  "stderr": "",
+  "exit_code": 0,
+  "duration": 0.12
+}
 
+```
+- **Error Response (401/400/500):**
+- ref: RFC 7807 Problem Details
+```
+{
+  "type": "https://example.com/errors/unauthorized",
+  "title": "Unauthorized",
+  "status": 401,
+  "detail": "Invalid token"
+}
+
+```
 ##### File Transfer
+Provides endpoints for uploading and downloading files.
+**Upload File**:
+- **Endpoint**: `POST /api/files`
+- **Option 1: Multipart Form Data** (recommended for binary files)
+```http
+POST /api/files HTTP/1.1
+Content-Type: multipart/form-data; boundary=----WebKitFormBoundary
+Authorization: Bearer <token>
 
-**Upload** (replaces `write_file()` and `upload_file()`):
-```protobuf
-// Client-streaming RPC for file upload
-rpc WriteFile(stream WriteFileRequest) returns (WriteFileResponse);
+------WebKitFormBoundary
+Content-Disposition: form-data; name="path"
 
-message WriteFileRequest {
-    oneof request {
-        WriteFileMetadata metadata = 1;
-        bytes chunk = 2;
-    }
+/workspace/test.txt
+------WebKitFormBoundary
+Content-Disposition: form-data; name="file"; filename="test.txt"
+Content-Type: text/plain
+
+[file content]
+------WebKitFormBoundary
+Content-Disposition: form-data; name="mode"
+
+0644
+------WebKitFormBoundary--
+
+```
+- **Option 2: JSON with Base64** (for text files or API convenience)
+```json
+{
+  "path": "/workspace/test.txt",
+  "content": "SGVsbG8gV29ybGQ=",
+  "mode": "0644"
 }
-
-message WriteFileMetadata {
-    string path = 1;
-    optional uint32 mode = 2;  // File permissions (e.g., 0644)
-}
-
-message WriteFileResponse {
-    EntryInfo entry = 1;
+```
+- **Response**:
+```json
+{
+  "path": "/workspace/test.txt",
+  "size": 1024,
+  "mode": "0644",
+  "modified": "2025-11-18T10:30:00Z"
 }
 ```
 
-**Download** (replaces `download_file()`):
-```protobuf
-// Server-streaming RPC for file download
-rpc ReadFile(ReadFileRequest) returns (stream ReadFileResponse);
+**Download File**:
+- **Endpoint**: `GET /api/files/{path}`
+- **Request**:
+```http
+GET /api/files/workspace/test.txt HTTP/1.1
+Authorization: Bearer <token>
+```
+- **Response**:
+```http
+HTTP/1.1 200 OK
+Content-Type: text/plain
+Content-Length: 1024
+Content-Disposition: attachment; filename="test.txt"
 
-message ReadFileRequest {
-    string path = 1;
-}
-
-message ReadFileResponse {
-    oneof response {
-        ReadFileMetadata metadata = 1;
-        bytes chunk = 2;
-    }
-}
-
-message ReadFileMetadata {
-    EntryInfo entry = 1;
-}
+[file content]
 ```
 
+For binary files, appropriate `Content-Type` is set (e.g., `application/octet-stream`, `image/png`). `Content-Disposition` is always included to ensure correct filename handling.
 
 ## Python SDK Interface
 
 ### PicoDClient Class
 
-The Python SDK provides a simple interface for interacting with PicoD:
+The Python SDK provides a high‑level wrapper around PicoD’s REST API, making it easy to execute commands and transfer files programmatically:
 
 ```python
+import requests, os, shlex, base64
+from typing import Dict, List, Optional
+
 class PicoDClient:
-    """Client for interacting with PicoD daemon via gRPC"""
+    """Client for interacting with PicoD daemon via REST API"""
     
-    def __init__(self, host: str, port: int = 49983, access_token: str):
+    def __init__(self, host: str, port: int = 8080, access_token: str):
         """Initialize PicoD client with connection parameters"""
+        self.base_url = f"http://{host}:{port}"
+        self.headers = {
+            "Authorization": f"Bearer {access_token}",
+            "Content-Type": "application/json"
+        }
         
-    def execute_command(self, command: str, timeout: float = 30) -> str:
+    def execute_command(self, command: str, timeout: float = 30, 
+                       working_dir: Optional[str] = None,
+                       env: Optional[Dict[str, str]] = None) -> str:
         """Execute a command and return stdout"""
+        response = requests.post(
+            f"{self.base_url}/api/execute",
+            headers=self.headers,
+            json={
+                "command": command,
+                "timeout": timeout,
+                "working_dir": working_dir,
+                "env": env or {}
+            }
+        )
+        response.raise_for_status()
+        result = response.json()
+        if result["exit_code"] != 0:
+            raise PicoDError(f"Command failed: {result['stderr']}")
+        return result["stdout"]
         
     def execute_commands(self, commands: List[str]) -> Dict[str, str]:
-        """Execute multiple commands"""
+        """Execute multiple commands sequentially"""
+        return {cmd: self.execute_command(cmd) for cmd in commands}
         
     def run_code(self, language: str, code: str, timeout: float = 30) -> str:
         """Run code snippet in specified language"""
+        if language.lower() in ["python", "py", "python3"]:
+            command = f"python3 -c {shlex.quote(code)}"
+        elif language.lower() in ["bash", "sh", "shell"]:
+            command = f"bash -c {shlex.quote(code)}"
+        else:
+            raise ValueError(f"Unsupported language: {language}")
+        return self.execute_command(command, timeout)
         
-    def write_file(self, content: str, remote_path: str, mode: Optional[int] = None) -> None:
-        """Write content to remote file"""
+    def write_file(self, content: str, remote_path: str, mode: Optional[str] = None) -> None:
+        """Write content to remote file (JSON/base64)"""
+        content_b64 = base64.b64encode(content.encode()).decode()
+        response = requests.put(
+            f"{self.base_url}/api/files/{remote_path}",
+            headers=self.headers,
+            json={
+                "content": content_b64,
+                "mode": mode or "0644"
+            }
+        )
+        response.raise_for_status()
         
-    def upload_file(self, local_path: str, remote_path: str, mode: Optional[int] = None) -> None:
-        """Upload local file to remote server"""
+    def upload_file(self, local_path: str, remote_path: str, mode: Optional[str] = None) -> None:
+        """Upload local file to remote server (multipart/form-data)"""
+        with open(local_path, 'rb') as f:
+            files = {'file': f}
+            data = {'path': remote_path}
+            if mode:
+                data['mode'] = mode
+            headers = {"Authorization": self.headers["Authorization"]}
+            response = requests.post(
+                f"{self.base_url}/api/files",
+                headers=headers,
+                files=files,
+                data=data
+            )
+            response.raise_for_status()
         
     def download_file(self, remote_path: str, local_path: str) -> None:
         """Download remote file to local path"""
+        response = requests.get(
+            f"{self.base_url}/api/files/{remote_path}",
+            headers={"Authorization": self.headers["Authorization"]},
+            stream=True
+        )
+        response.raise_for_status()
+        
+        os.makedirs(os.path.dirname(local_path) or '.', exist_ok=True)
+        with open(local_path, 'wb') as f:
+            for chunk in response.iter_content(chunk_size=8192):
+                f.write(chunk)
+    
+    def health_check(self) -> Dict:
+        """Check server health"""
+        response = requests.get(f"{self.base_url}/health")
+        response.raise_for_status()
+        return response.json()
+
+class PicoDError(Exception):
+    """Custom exception for PicoD client errors"""
+    pass
+
+```
+## Contribute to AgentCube
+
+### Client Side
+The client side of AgentCube provides the SDK and utilities that developers use to interact with sandbox environments. This layer abstracts away the complexity of sandbox lifecycle management, command execution, and file transfer, offering a clean Python interface.
+
+#### Current Structure
+
+```mermaid
+classDiagram
+    %% Base classes
+    class Sandbox {
+        <<enumeration>>
+        RUNNING
+        PENDING
+        FAILED
+        UNKNOWN
+        +__init__(ttl, image, api_url, ssh_public_key)
+        +__enter__()
+        +__exit__(exc_type, exc_val, exc_tb)
+        +is_running() bool
+        +get_info() Dict~str, Any~
+        +list_sandboxes() List~Dict~str, Any~~
+        +stop() bool
+        +cleanup()
+    }
+
+    class CodeInterpreterClient {
+        +__init__(ttl, image, api_url)
+        +execute_command(command) str
+        +execute_commands(commands) Dict~str, str~
+        +run_code(language, code, timeout) str
+        +write_file(content, remote_path)
+        +upload_file(local_path, remote_path)
+        +download_file(remote_path, local_path) str
+        +cleanup()
+    }
+
+    %% Client classes
+    class SandboxClient {
+        +__init__(api_url)
+        +create_sandbox(ttl, image, ssh_public_key, metadata) str
+        +get_sandbox(sandbox_id) Optional~Dict~str, Any~~
+        +list_sandboxes() List~Dict~str, Any~~
+        +delete_sandbox(sandbox_id) bool
+        +establish_tunnel(sandbox_id, auth_token) socket.socket
+        +cleanup()
+    }
+
+    class SandboxSSHClient {
+        +__init__(private_key, tunnel_sock)
+        +connect_ssh() paramiko.SSHClient
+        +execute_command(command, timeout) str
+        +execute_commands(commands) Dict~str, str~
+        +run_code(language, code, timeout) str
+        +write_file(content, remote_path)
+        +upload_file(local_path, remote_path)
+        +download_file(remote_path, local_path) str
+        +cleanup()
+        +_sftp_mkdir_p(sftp, remote_dir)
+        +generate_ssh_key_pair() Tuple~str, paramiko.RSAKey~
+    }
+
+    %% Relationships
+    CodeInterpreterClient --|> Sandbox : inherits
+    SandboxClient --> Sandbox : uses
+    CodeInterpreterClient --> SandboxClient : uses
+    CodeInterpreterClient --> SandboxSSHClient : uses
+    SandboxSSHClient --> SandboxClient : uses
+
+    %% Constants and utilities
+    class constants {
+        DEFAULT_TTL
+        DEFAULT_IMAGE
+        DEFAULT_API_URL
+        DEFAULT_HOSTNAME
+        DEFAULT_USER
+        DEFAULT_TIMEOUT
+        DEFAULT_BANNER_TIMEOUT
+    }
+
 ```
 
+#### New Alternative: PicodClient
+
+To modernize the client side and align with PicoD’s RESTful design, we introduce **PicoDClient** as an alternative to `SandboxSSHClient`. While `SandboxSSHClient` uses SSH tunnels and SFTP for communication, `PicoDClient` interacts directly with PicoD via HTTP + JWT authentication.
+
+```mermaid
+classDiagram
+    %% Base class
+    class Sandbox {
+        <<enumeration>>
+        RUNNING
+        PENDING
+        FAILED
+        UNKNOWN
+        +__init__(ttl, image, api_url)
+        +__enter__()
+        +__exit__(exc_type, exc_val, exc_tb)
+        +is_running() bool
+        +get_info() Dict~str, Any~
+        +list_sandboxes() List~Dict~str, Any~~
+        +stop() bool
+        +cleanup()
+    }
+
+    %% High-level client
+    class CodeInterpreterClient {
+        +__init__(ttl, image, api_url, backend)
+        +execute_command(command) str
+        +execute_commands(commands) Dict~str, str~
+        +run_code(language, code, timeout) str
+        +write_file(content, remote_path)
+        +upload_file(local_path, remote_path)
+        +download_file(remote_path, local_path) str
+        +cleanup()
+    }
+
+    %% Sandbox management
+    class SandboxClient {
+        +__init__(api_url)
+        +create_sandbox(ttl, image, metadata) str
+        +get_sandbox(sandbox_id) Optional~Dict~str, Any~~
+        +list_sandboxes() List~Dict~str, Any~~
+        +delete_sandbox(sandbox_id) bool
+        +cleanup()
+    }
+
+    %% SSH-based implementation
+    class SandboxSSHClient {
+        +__init__(private_key, tunnel_sock)
+        +connect_ssh() paramiko.SSHClient
+        +execute_command(command, timeout) str
+        +execute_commands(commands) Dict~str, str~
+        +run_code(language, code, timeout) str
+        +write_file(content, remote_path)
+        +upload_file(local_path, remote_path)
+        +download_file(remote_path, local_path) str
+        +cleanup()
+    }
+
+    %% PicoD-based implementation
+    class PicoDClient {
+        +__init__(api_url, auth_token)
+        +execute_command(command, timeout) str
+        +execute_commands(commands) Dict~str, str~
+        +run_code(language, code, timeout) str
+        +write_file(content, remote_path)
+        +upload_file(local_path, remote_path)
+        +download_file(remote_path, local_path) str
+        +cleanup()
+    }
+
+    %% Relationships
+    CodeInterpreterClient --|> Sandbox : inherits
+    CodeInterpreterClient --> SandboxClient : uses
+    CodeInterpreterClient --> SandboxSSHClient : backend
+    CodeInterpreterClient --> PicoDClient : backend
+    SandboxClient --> Sandbox : manages
+
+```
 ## Security Considerations
 
-1. **Token Management**:
-   - Access tokens generated per sandbox instance by AgentCube API server
-   - Tokens stored securely in memory only within PicoD
-   - Token provided at PicoD startup via one of the configured sources
-   - No token rotation needed (PicoD lifecycle matches sandbox lifecycle)
+Because PicoD runs as a daemon inside sandbox environments, security is a critical design priority. The following measures ensure that execution and file operations remain isolated, authenticated, and controlled.
 
-2. **File Access Control**:
-   - Path sanitization to prevent directory traversal attacks
-   - User-based permission checks enforced by OS
-   - No arbitrary file system access outside sandbox boundaries
+**Token Management**  
+- JWT required for all requests  
+- Short-lived tokens validated via JWKS  
+- Stateless, no token storage  
 
-3. **Process Isolation**:
-   - Processes run with sandbox user privileges
-   - Resource limits enforced via container runtime (cgroups)
-   - No privilege escalation mechanisms
+**File Access Control**  
+- Path sanitization prevents directory traversal  
+- Restricted to sandbox workspace only  
+- Enforced by OS-level permissions  
 
-4. **Network Security**:
-   - PicoD listens on all interfaces (0.0.0.0) within sandbox network namespace
-   - Network isolation provided by container/pod networking
-   - Token authentication required for all operations
-   - Optional TLS support for production deployments
+**Logging & Auditing**  
+- Centralized logging and audit handled by AgentCube APIServer  
 
-
+**Update & Patch Management**  
+- Minimal attack surface  
+- Immutable, signed builds  
+- Regular updates recommended
 ## Future Enhancements
 
-1. **WebSocket Support**: Real-time bidirectional communication for interactive shells
-2. **Compression**: Gzip compression for file transfers
-3. **Multiplexing**: Multiple operations over single connection
-4. **Metrics Export**: Prometheus-compatible metrics endpoint
-5. **Plugin System**: Custom handlers for domain-specific operations
-6. **TLS/mTLS**: Encrypted communication for production environments
+PicoD is designed with extensibility in mind. Potential improvements include:
+
+1. **WebSocket Support**  
+   Real-time bidirectional communication for interactive shells and streaming output.
+
+2. **Compression**  
+   Gzip or similar compression for efficient file transfers.
+
+3. **Multiplexing**  
+   Support for multiple operations over a single connection to reduce overhead.
+
+4. **Metrics Export**  
+   Prometheus-compatible endpoint for monitoring and observability.
+
+5. **Plugin System**  
+   Custom handlers for domain-specific operations, enabling extensibility.
+
+6. **TLS/mTLS**  
+   Encrypted communication with optional mutual TLS for production deployments.
 
 ## Conclusion
 
-PicoD provides a lightweight, efficient alternative to SSH for sandbox management in AgentCube. By leveraging modern HTTP/gRPC protocols and token-based authentication, it reduces resource overhead while maintaining security and functionality. The design ensures easy integration with existing AgentCube infrastructure and provides a clear migration path from the current SSH-based implementation.
+PicoD offers a lightweight, efficient alternative to SSH for sandbox management in AgentCube. By using RESTful HTTP APIs with JSON payloads and token-based authentication, it reduces resource overhead while maintaining strong security and functionality. The design emphasizes:
+
+- **Easy Integration**: Works with any HTTP client (curl, Postman, requests, axios, etc.)  
+- **Human Readability**: JSON responses are simple to debug and understand  
+- **Broad Compatibility**: Accessible from browsers, mobile apps, and all programming languages  
+- **Straightforward Testing**: No need for specialized tools like grpcurl  
+
+This approach ensures seamless integration with AgentCube infrastructure and provides a clear migration path from the current SSH-based implementation, enabling secure, scalable, and future-ready sandbox operations.
