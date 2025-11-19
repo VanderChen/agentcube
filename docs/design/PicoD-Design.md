@@ -32,49 +32,57 @@ An AI agent performs a complete machine learning workflow - uploading data, inst
 
 ```python
 
-from agentcube import Sandbox
+from agentcube import CodeInterpreterClient
 
-# Create a sandbox instance
-sandbox = Sandbox(ttl=3600, image="python:3.11-slim")
-
-# Step 1: Upload dependencies file (WriteFile API)
-sandbox.write_file(
-    content="pandas\nnumpy\nscikit-learn\nmatplotlib",
-    remote_path="/workspace/requirements.txt"
+# Create a CodeInterpreterClient instance
+code_interpreter = CodeInterpreterClient(
+    ttl=3600,  # Time-to-live in seconds
+    image="sandbox:latest",  # Container image to use
 )
 
-# Step 2: Install dependencies (Execute API)
-sandbox.execute_command("pip install -r /workspace/requirements.txt")
+try:
+    # Step 1: Upload dependencies file (WriteFile API)
+    code_interpreter.write_file(
+        content="pandas\nnumpy\nscikit-learn\nmatplotlib",
+        remote_path="/workspace/requirements.txt"
+    )
 
-# Step 3: Upload training data (WriteFile API)
-sandbox.upload_file(
-    local_path="./data/train.csv",
-    remote_path="/workspace/train.csv"
-)
+    # Step 2: Install dependencies (Execute API)
+    code_interpreter.execute_command("pip install -r /workspace/requirements.txt")
 
-# Step 4: Train model (Execute API)
-training_code = """
-import pandas as pd
-from sklearn.linear_model import LinearRegression
-import pickle
+    # Step 3: Upload training data (WriteFile API)
+    code_interpreter.upload_file(
+        local_path="./data/train.csv",
+        remote_path="/workspace/train.csv"
+    )
 
-df = pd.read_csv('/workspace/train.csv')
-X, y = df[['feature1', 'feature2']], df['target']
+    # Step 4: Train model (Execute API)
+    training_code = """
+    import pandas as pd
+    from sklearn.linear_model import LinearRegression
+    import pickle
 
-model = LinearRegression().fit(X, y)
-pickle.dump(model, open('/workspace/model.pkl', 'wb'))
-print(f'Model R² score: {model.score(X, y):.4f}')
-"""
-result = sandbox.run_code("python", training_code)
-print(result)
+    df = pd.read_csv('/workspace/train.csv')
+    X, y = df[['feature1', 'feature2']], df['target']
 
-# Step 5: Download trained model (ReadFile API)
-sandbox.download_file(
-    remote_path="/workspace/model.pkl",
-    local_path="./models/model.pkl"
-)
+    model = LinearRegression().fit(X, y)
+    pickle.dump(model, open('/workspace/model.pkl', 'wb'))
+    print(f'Model R² score: {model.score(X, y):.4f}')
+    """
+    result = code_interpreter.run_code("python", training_code)
 
-print("Workflow completed successfully!")
+    print(result)
+
+    # Step 5: Download trained model (ReadFile API)
+    code_interpreter.download_file(
+        remote_path="/workspace/model.pkl",
+        local_path="./models/model.pkl"
+    )
+
+    print("Workflow completed successfully!")
+    
+finally:
+    code_interpreter.stop()
 
 ```
 
