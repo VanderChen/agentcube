@@ -237,7 +237,8 @@ participant Service as PicoD Services
 
 Client->>APIServer: Authenticate with Kubernetes token
 APIServer-->>Client: Issue JWT (signed with private key)
-Client->>PicoD: HTTP Request<br/>Authorization: Bearer JWT
+Client->>APIServer: HTTP Request<br/>Authorization: Bearer JWT
+APIServer->>PicoD: Call
 PicoD->>PicoD: Parse JWT header (alg, kid)
 alt Key cached
 PicoD->>PicoD: Load JWK by kid
