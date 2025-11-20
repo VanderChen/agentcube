@@ -8,11 +8,11 @@ The current AgentCube sandbox implementation relies on SSH (via `ssh_client.py`)
 - **Protocol Overhead**: SSH requires complex handshakes, key management, and persistent sessions, which add unnecessary weight in lightweight sandbox environments.
 - **Limited Flexibility**: The rigid nature of the SSH protocol makes it difficult to implement custom authentication schemes or optimize for specialized workflows.
 
-To overcome these limitations, we propose **PicoD** (Pico Daemon) — a lightweight, HTTP/gRPC-based service daemon. PicoD delivers essential sandbox capabilities with minimal overhead, while maintaining security through simple, token-based authentication.
+To overcome these limitations, we propose **PicoD** (Pico Daemon) — a lightweight, RESTful service daemon. PicoD delivers essential sandbox capabilities with minimal overhead, while maintaining security through simple, token-based authentication.
 
 ### Design Goals
 
-PicoD is designed as a **stateless daemon** that processes each gRPC request independently. Its guiding principles are:
+PicoD is designed as a **stateless daemon** that processes each request independently. Its guiding principles are:
 
 - **Lightweight**: Minimal resource footprint, optimized for containerized sandbox environments.
 - **Simple Protocol:** RESTful HTTP APIs with JSON payloads that are easy to integrate, debug, and test
@@ -80,7 +80,7 @@ try:
     )
 
     print("Workflow completed successfully!")
-    
+
 finally:
     code_interpreter.stop()
 
