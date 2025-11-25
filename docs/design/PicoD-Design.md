@@ -217,106 +217,122 @@ graph TB
 
 #### 3. Authentication & Authorization
 
-To ensure secure communication between clients and PicoD, we adopt a JWT + JWKS-based authentication model. This approach eliminates the need for pre-injecting keys into warm sandboxes, which is incompatible with the warm pool strategy used by AgentCube.
+PicoD implements a secure, lightweight authentication system designed specifically for sandbox environments.
 
-- **JWT (JSON Web Token):** Clients sign requests with a short-lived JWT using their private key.
+The core approach provides an **init interface** (`POST /api/init`) that establishes authentication credentials when a sandbox is allocated to an end user. The primary protection scenario is ensuring that **user-requested sandboxes can only be accessed by the designated user** - we only need to guarantee that the sandbox allocated to a user remains exclusive to that user throughout its lifecycle.
 
-- **JWKS (JSON Web Key Set):** PicoD validates the JWT signature against public keys published at a JWKS URL configured in each sandbox.
+The authentication model balances security with operational simplicity, using client-generated tokens and one-time initialization to bind each sandbox securely to its designated end user.
 
-- **Authorization:** Claims within the JWT (e.g., sub, aud, scope) determine which operations the client is permitted to perform.
-
-This design ensures that pre-heated sandboxes can securely accept requests from dynamically assigned clients without requiring pre-injected secrets.
+##### Authentication Architecture
 
 ```mermaid
 sequenceDiagram
-participant Client as AgentCube Client
-participant APIServer as AgentCube API Server
-participant JWKS as JWKS Endpoint
-participant PicoD as PicoD (Auth Middleware)
-participant Service as PicoD Services
-
-Client->>APIServer: Authenticate with Kubernetes token
-APIServer-->>Client: Issue JWT (signed with private key)
-Client->>APIServer: HTTP Request<br/>Authorization: Bearer JWT
-APIServer->>PicoD: Call
-PicoD->>PicoD: Parse JWT header (alg, kid)
-alt Key cached
-PicoD->>PicoD: Load JWK by kid
-else Key not cached
-PicoD->>JWKS: Fetch JWKS
-JWKS-->>PicoD: JWKS (public keys)
-PicoD->>PicoD: Select JWK by kid
-end
-PicoD->>PicoD: Verify signature + validate claims
-alt Valid & Authorized
-PicoD->>Service: Execute/Filesystem operation
-Service-->>PicoD: Response
-PicoD-->>Client: 200 OK
-else Invalid/Unauthorized
-PicoD-->>Client: 401 Unauthorized / 403 Forbidden
-end
-
+    participant Client as SDK Client
+    participant Frontend as AgentCube Frontend
+    participant PicoD as PicoD Daemon
+    
+    Note over Client, PicoD: Sandbox Allocation & Initialization
+    Client->>Frontend: POST /api/StartCodeInterpreter (token/public_key)
+    Frontend->>PicoD: Forward POST /api/init (with internal auth)
+    PicoD->>PicoD: Encrypt & store credentials locally
+    PicoD-->>Frontend: 200 OK (init successful)
+    Frontend-->>Client: 200 OK (init successful)
+    
+    Note over Client, PicoD: Authenticated Operations
+    Client->>PicoD: POST /api/execute (Authorization: Bearer <token>)
+    PicoD->>PicoD: Validate token against stored credentials
+    PicoD-->>Client: Command execution result
+    
+    Client->>PicoD: POST /api/files (Authorization: Bearer <token>)
+    PicoD->>PicoD: Validate token
+    PicoD-->>Client: File operation result
 ```
 
-- **Client Authentication with API Server**
-    
-    - The client first authenticates against the AgentCube API Server using its Kubernetes token.
-    - The API Server issues a JWT signed with the client’s private key.
-        
-- **Client Request to PicoD**
-    
-    - The client sends an HTTP request to PicoD with the JWT in the `Authorization: Bearer <JWT>` header.
-    - The request targets one of PicoD’s REST endpoints (`/api/execute`, `/api/files`, etc.).
-        
-- **JWT Parsing in PicoD**
-    
-    - PicoD extracts the JWT header and claims.
-    - The `kid` (Key ID) is used to identify which public key should be used for verification.
-        
-- **JWKS Lookup**
-    
-    - PicoD checks its local JWKS cache for the key.
-    - If not found, PicoD fetches the JWKS document from the configured JWKS URL.
-    - The JWKS contains one or more public keys; PicoD selects the correct one based on `kid`.
-        
-- **Signature Verification & Claim Validation**
-    
-    - PicoD verifies the JWT signature using the selected public key.
-    - Claims are validated:
-        - `iss` must match the trusted API Server.
-        - `aud` must equal `picod`.
-        - `exp` and `iat` must be valid.
-        - `jti` checked for replay protection.
-            
-- **Authorization Enforcement**
-    
-    - PicoD inspects claims like `scope` or `roles` to determine allowed operations.
-    - Example: `scope=execute` permits `/api/execute`; `scope=files:read` permits file downloads.
-    - If claims don’t authorize the request, PicoD returns `403 Forbidden`.
-        
-- **Response Handling**
-    
-    - If valid and authorized, PicoD forwards the request to the appropriate service (Filesystem or Process).
-    - The service executes the operation and returns a response.
-    - PicoD sends back `200 OK` with the result.
-    - If invalid, send back `401 Unauthorization` or `403 Forbindden`.
+##### Security Considerations
 
-### Alternative Approaches Considered
+**1. One-Time Initialization**
+- Init interface can only be called once per sandbox lifecycle
+- Credentials cannot be modified after initial setup
+- Implementation includes atomic file operations to prevent race conditions
 
-1. **Pre-injected Key Pairs (Cloud-Init, Environment Variables, Secret Mounts)**
-    
-    - **Pros:** Simple to implement; widely used in VM/container setups.
-    - **Cons:** Incompatible with warm pools (keys must be injected before sandbox assignment); insecure if environment variables are exposed; poor rotation support.
-        
-2. **Static Shared Secret (Environment Variable or Config File)**
-    
-    - **Pros:** Very simple; no external dependency.
-    - **Cons:** Weak security; no rotation; risk of leakage; unsuitable for multi-tenant environments.
-        
-3. **Mutual TLS (mTLS)**
-    
-    - **Pros:** Strong authentication; proven in production.
-    - **Cons:** Requires certificate distribution and management; heavy for lightweight sandboxes; not flexible for dynamic warm pools.
+**2. Frontend-Only Access Control**
+- Init endpoint restricted to internal network calls from AgentCube frontend
+- Rate limiting on init endpoint to prevent brute force attempts
+
+**3. Credential Security**
+- Client-generated tokens/keypairs ensure frontend never stores user credentials
+- Local encryption prevents credential exposure if container is compromised
+- Automatic credential cleanup on container termination
+
+**4. Warmpool Compatibility**
+- Containers start without authentication credentials
+- Init interface called only when sandbox allocated to specific user
+
+##### Core Authentication Components
+
+**1. Initialization Interface**
+
+- **Endpoint**: `POST /api/init`
+- **Purpose**: One-time setup of authentication credentials when sandbox is allocated to end user
+- **Access Control**: Frontend-only (protected against external access)
+- **Request Body**:
+
+```json
+{
+  "auth_type": "token|keypair",
+  "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+  "public_key": "-----BEGIN PUBLIC KEY-----\n...",
+  "metadata": {
+    "user_id": "user123",
+    "session_id": "sess456",
+    "allocated_at": "2025-11-25T14:30:00Z"
+  }
+}
+```
+
+- **Response**:
+
+```json
+{
+  "status": "initialized",
+  "auth_type": "token",
+  "expires_at": "2025-11-25T18:30:00Z"
+}
+```
+
+**2. Token Storage & Encryption**
+
+- **Local Storage**: Credentials encrypted and stored in `/var/lib/picod/auth.enc`
+- **Encryption**: AES-256-GCM with container-specific key derived from sandbox metadata
+- **File Permissions**: 600 (owner read/write only)
+- **Storage Format**:
+
+```json
+{
+  "auth_type": "token",
+  "encrypted_credentials": "base64_encrypted_data",
+  "salt": "random_salt",
+  "initialized_at": "2025-11-25T14:30:00Z",
+  "metadata": {
+    "user_id": "user123",
+    "session_id": "sess456"
+  }
+}
+```
+
+**3. Request Authentication**
+
+All API requests (except `/api/init`) require authentication:
+
+- **Header**: `Authorization: Bearer <token>`
+- **Validation Process**:
+  1. Extract token from Authorization header
+  2. Decrypt stored credentials
+  3. Validate token signature/format
+  4. Check token expiration (if applicable)
+  5. Verify token matches stored credentials
+
+
 #### 4. Core Capabilities
 PicoD provides a lightweight REST API that replaces traditional SSH‑based operations with secure, stateless HTTP endpoints. The two primary capabilities are code execution and file transfer, exposed via JSON or multipart requests.
 
@@ -596,31 +612,6 @@ classDiagram
 
 ```
 
-## Security Considerations
-
-Because PicoD runs as a daemon inside sandbox environments, security is a critical design priority. The following measures ensure that execution and file operations remain isolated, authenticated, and controlled.
-
-**Token Management**  
-
-- JWT required for all requests  
-- Short-lived tokens validated via JWKS  
-- Stateless, no token storage  
-
-**File Access Control**  
-
-- Path sanitization prevents directory traversal  
-- Restricted to sandbox workspace only  
-- Enforced by OS-level permissions  
-
-**Logging & Auditing**  
-
-- Centralized logging and audit handled by AgentCube APIServer  
-
-**Update & Patch Management**  
-
-- Minimal attack surface  
-- Immutable, signed builds  
-- Regular updates recommended
 
 ## Future Enhancements
 
