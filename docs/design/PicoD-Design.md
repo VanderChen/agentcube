@@ -88,11 +88,11 @@ finally:
 
 **API Calls Flow**:
 
-1. **POST /api/files**: Upload requirements.txt via multipart/form-data or JSON base64
-2. **POST /api/execute**: Install dependencies via pip command
-3. **POST /api/files**: Upload training data CSV file
-4. **POST /api/execute**: Run Python training code that processes data and trains model
-5. **GET /api/files/{path}**: Download trained model
+1. **POST /tools/code-interpreter/files**: Upload requirements.txt via multipart/form-data or JSON base64
+2. **POST /tools/code-interpreter/execute**: Install dependencies via pip command
+3. **POST /tools/code-interpreter/files**: Upload training data CSV file
+4. **POST /tools/code-interpreter/execute**: Run Python training code that processes data and trains model
+5. **GET /tools/code-interpreter/files/{path}**: Download trained model
 
 All operations use standard HTTP requests with token authentication in Authorization header.
 
@@ -110,10 +110,10 @@ PicoD follows REST API best practices for simplicity and broad compatibility:
 
 ### Core API Endpoints
 
-1. **POST /api/execute** - Execute commands
-2. **POST /api/files** - Upload files
-3. **GET /api/files/{path}** - Download files
-4. **GET /health** - Health check endpoint
+1. **POST /tools/code-interpreter/execute** - Execute commands
+2. **POST /tools/code-interpreter/files** - Upload files
+3. **GET /tools/code-interpreter/files/{path}** - Download files
+4. **GET /tools/code-interpreter/health** - Health check endpoint
 
 ## PicoD Architecture
 
@@ -137,10 +137,10 @@ graph TB
         end
         
         subgraph Handlers["HTTP Handlers"]
-            ExecuteHandler[POST /api/execute]
-            UploadHandler[POST /api/files]
-            DownloadHandler[GET /api/files/*]
-            HealthHandler[GET /health]
+            ExecuteHandler[POST /tools/code-interpreter/execute]
+            UploadHandler[POST /tools/code-interpreter/files]
+            DownloadHandler[GET /tools/code-interpreter/files/*]
+            HealthHandler[GET /tools/code-interpreter/health]
         end
         
         subgraph Logic["Business Logic"]
@@ -197,22 +197,22 @@ graph TB
   
 **Command Execution**
 
-- `POST /api/execute` - Execute command and return output (replaces `execute_command()`)
+- `POST /tools/code-interpreter/execute` - Execute command and return output (replaces `execute_command()`)
     - Request: JSON with command, timeout, env vars
     - Response: JSON with stdout, stderr, exit_code
 
 **File Operations**
 
-- `POST /api/files` - Upload file (replaces `write_file()` and `upload_file()`)
+- `POST /tools/code-interpreter/files` - Upload file (replaces `write_file()` and `upload_file()`)
     - Request: multipart/form-data or JSON with base64 content
     - Response: JSON with file info
-- `GET /api/files/{path}` - Download file (replaces `download_file()`)
+- `GET /tools/code-interpreter/files/{path}` - Download file (replaces `download_file()`)
     - Request: File path in URL
     - Response: File content with appropriate Content-Type
 
 **Health Check**
 
-- `GET /health` - Server health status
+- `GET /tools/code-interpreter/health` - Server health status
     - Response: JSON with status and uptime
 
 #### 3. Authentication & Authorization
@@ -266,7 +266,7 @@ end
 - **Client Request to PicoD**
     
     - The client sends an HTTP request to PicoD with the JWT in the `Authorization: Bearer <JWT>` header.
-    - The request targets one of PicoD’s REST endpoints (`/api/execute`, `/api/files`, etc.).
+    - The request targets one of PicoD’s REST endpoints (`/tools/code-interpreter/execute`, `/tools/code-interpreter/files`, etc.).
         
 - **JWT Parsing in PicoD**
     
@@ -291,7 +291,7 @@ end
 - **Authorization Enforcement**
     
     - PicoD inspects claims like `scope` or `roles` to determine allowed operations.
-    - Example: `scope=execute` permits `/api/execute`; `scope=files:read` permits file downloads.
+    - Example: `scope=execute` permits `/tools/code-interpreter/execute`; `scope=files:read` permits file downloads.
     - If claims don’t authorize the request, PicoD returns `403 Forbidden`.
         
 - **Response Handling**
@@ -322,7 +322,7 @@ PicoD provides a lightweight REST API that replaces traditional SSH‑based oper
 
 ###### Code Execution
 
-- **Endpoint: POST /api/execute**
+- **Endpoint: POST /tools/code-interpreter/execute**
 - **Request Body (JSON):**
 
  ```json
@@ -366,11 +366,11 @@ PicoD provides a lightweight REST API that replaces traditional SSH‑based oper
 Provides endpoints for uploading and downloading files.
 **Upload File**:
 
-- **Endpoint**: `POST /api/files`
+- **Endpoint**: `POST /tools/code-interpreter/files`
 - **Option 1: Multipart Form Data** (recommended for binary files)
 
 ```http
-POST /api/files HTTP/1.1
+POST /tools/code-interpreter/files HTTP/1.1
 Content-Type: multipart/form-data; boundary=----WebKitFormBoundary
 Authorization: Bearer <token>
 
@@ -411,12 +411,11 @@ Content-Disposition: form-data; name="mode"
 ```
 
 **Download File**:
-
-- **Endpoint**: `GET /api/files/{path}`
+- **Endpoint**: `GET /tools/code-interpreter/files/{path}`
 - **Request**:
 
 ```http
-GET /api/files/workspace/test.txt HTTP/1.1
+GET /tools/code-interpreter/files/workspace/test.txt HTTP/1.1
 Authorization: Bearer <token>
 ```
 
