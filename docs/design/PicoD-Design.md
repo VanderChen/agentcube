@@ -229,21 +229,28 @@ The authentication model balances security with operational simplicity, using cl
 sequenceDiagram
     participant Client as SDK Client
     participant Frontend as AgentCube Frontend
+    participant SandboxMgr as Sandbox Manager
     participant PicoD as PicoD Daemon
     
+
+    Note over Client, PicoD: Sandbox Creating & Frontend Auth Initialization
+    Frontend-->>Frontend: Key Pair Generation
+    SandboxMgr-->>PicoD: Create CodeInterpreter Sandbox with frontend public key embedded
+    
+    
     Note over Client, PicoD: Sandbox Allocation & Initialization
-    Client->>Frontend: POST /api/StartCodeInterpreter (token/public_key)
-    Frontend->>PicoD: Forward POST /api/init (with internal auth)
+    Client->>Frontend: POST /api/StartCodeInterpreter (with client public key)
+    Frontend->>PicoD: Forward POST /api/init (with client public key & auth by frontend key pair)
     PicoD->>PicoD: Encrypt & store credentials locally
     PicoD-->>Frontend: 200 OK (init successful)
     Frontend-->>Client: 200 OK (init successful)
     
     Note over Client, PicoD: Authenticated Operations
-    Client->>PicoD: POST /api/execute (Authorization: Bearer <token>)
+    Client->>PicoD: POST /api/execute (Authorization: client key pair)
     PicoD->>PicoD: Validate token against stored credentials
     PicoD-->>Client: Command execution result
     
-    Client->>PicoD: POST /api/files (Authorization: Bearer <token>)
+    Client->>PicoD: POST /api/files (Authorization: client key pair)
     PicoD->>PicoD: Validate token
     PicoD-->>Client: File operation result
 ```
@@ -256,6 +263,7 @@ sequenceDiagram
 - Implementation includes atomic file operations to prevent race conditions
 
 **2. Frontend-Only Access Control**
+- Use pre-embedded key pair
 - Init endpoint restricted to internal network calls from AgentCube frontend
 - Rate limiting on init endpoint to prevent brute force attempts
 
