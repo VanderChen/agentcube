@@ -10,7 +10,7 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	apiserver "github.com/volcano-sh/agentcube/pkg/apiserver"
+	"github.com/volcano-sh/agentcube/pkg/router"
 )
 
 var (
@@ -33,7 +33,20 @@ func (r *AgentdReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 		return ctrl.Result{}, err
 	}
 
-	lastActivityStr, exists := sandbox.Annotations[apiserver.LastActivityAnnotationKey]
+	// Only process running sandboxes
+	isRunning := false
+	for _, condition := range sandbox.Status.Conditions {
+		if condition.Type == string(sandboxv1alpha1.SandboxConditionReady) && condition.Status == "True" {
+			isRunning = true
+			break
+		}
+	}
+
+	if !isRunning {
+		return ctrl.Result{}, nil
+	}
+
+	lastActivityStr, exists := sandbox.Annotations[router.LastActivityAnnotationKey]
 	var lastActivity time.Time
 	if exists && lastActivityStr != "" {
 		lastActivity, err = time.Parse(time.RFC3339, lastActivityStr)

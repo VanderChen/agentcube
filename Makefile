@@ -2,8 +2,8 @@
 
 # Build targets
 build:
-	@echo "Building agentcube-apiserver..."
-	go build -o bin/agentcube-apiserver ./cmd/apiserver
+	@echo "Building agentcube-router..."
+	go build -o bin/agentcube-router ./cmd/router
 
 build-agentd:
 	@echo "Building agentd..."
@@ -17,26 +17,23 @@ build-all: build build-agentd build-test-tunnel
 
 # Run server (development mode)
 run:
-	@echo "Running agentcube-apiserver..."
-	go run ./cmd/apiserver/main.go \
+	@echo "Running agentcube-router..."
+	go run ./cmd/router/main.go \
 		--port=8080 \
-		--ssh-username=sandbox \
-		--ssh-port=22
+		--debug
 
 # Run server (with kubeconfig)
 run-local:
-	@echo "Running agentcube-apiserver with local kubeconfig..."
-	go run ./cmd/apiserver/main.go \
+	@echo "Running agentcube-router with local kubeconfig..."
+	go run ./cmd/router/main.go \
 		--port=8080 \
-		--kubeconfig=${HOME}/.kube/config \
-		--ssh-username=sandbox \
-		--ssh-port=22
+		--debug
 
 # Clean build artifacts
 clean:
 	@echo "Cleaning..."
 	rm -rf bin/
-	rm -f agentcube-apiserver agentd
+	rm -f agentcube-router agentd
 
 # Install dependencies
 deps:
@@ -67,8 +64,8 @@ lint:
 
 # Install to system
 install: build
-	@echo "Installing agentcube-apiserver..."
-	sudo cp bin/agentcube-apiserver /usr/local/bin/
+	@echo "Installing agentcube-router..."
+	sudo cp bin/agentcube-router /usr/local/bin/
 
 # Docker image variables
 APISERVER_IMAGE ?= agentcube-apiserver:latest
@@ -106,15 +103,15 @@ docker-push: docker-build
 
 k8s-deploy:
 	@echo "Deploying to Kubernetes..."
-	kubectl apply -f k8s/agentcube-apiserver.yaml
+	kubectl apply -f k8s/agentcube-router.yaml
 
 k8s-delete:
 	@echo "Deleting from Kubernetes..."
-	kubectl delete -f k8s/agentcube-apiserver.yaml
+	kubectl delete -f k8s/agentcube-router.yaml
 
 k8s-logs:
 	@echo "Showing logs..."
-	kubectl logs -n agentcube -l app=agentcube-apiserver -f
+	kubectl logs -n agentcube -l app=agentcube-router -f
 
 # Load image to kind cluster
 kind-load:
@@ -250,7 +247,6 @@ help:
 	@echo "  make docker-build APISERVER_IMAGE=my-api:v1.0"
 	@echo "  make docker-buildx-push IMAGE_REGISTRY=docker.io/myuser"
 	@echo "  make sandbox-buildx-push IMAGE_REGISTRY=ghcr.io/myorg SANDBOX_IMAGE=sandbox:v2"
-
 
 # E2E Test targets
 E2E_CLUSTER_NAME ?= agentcube-e2e
