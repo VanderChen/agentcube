@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"flag"
+	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
@@ -27,7 +28,7 @@ func main() {
 
 	// Initialize klog flags
 	klog.InitFlags(nil)
-	
+
 	// Parse command line flags
 	flag.Parse()
 
@@ -50,15 +51,19 @@ func main() {
 		klog.Fatalf("Failed to create Router API server: %v", err)
 	}
 
-	// Setup signal handling with context cancellation
-	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	// Setup signal handling
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
+
+	// Create context for server
+	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
 	// Start Router API server in goroutine
 	errCh := make(chan error, 1)
 	go func() {
 		klog.Infof("Starting agentcube Router server on port %s", *port)
-		if err := server.Start(ctx); err != nil {
+		if err := server.Start(ctx); err != nil && err != http.ErrServerClosed {
 			errCh <- err
 		}
 		close(errCh)
@@ -66,8 +71,8 @@ func main() {
 
 	// Wait for signal or error
 	select {
-	case <-ctx.Done():
-		klog.Info("Received shutdown signal, shutting down gracefully...")
+	case sig := <-sigCh:
+		klog.Infof("Received shutdown signal: %v, shutting down gracefully...", sig)
 		// Cancel the context to trigger server shutdown
 		cancel()
 		// Wait for server goroutine to exit after graceful shutdown is complete
