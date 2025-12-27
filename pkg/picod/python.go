@@ -23,6 +23,16 @@ type RunPythonResponse struct {
 
 // RunPythonHandler handles Python code execution requests
 func (s *Server) RunPythonHandler(c *gin.Context) {
+	// Check if Jupyter Manager is available
+	if s.jupyterManager == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{
+			"error":  "Python code execution is not available",
+			"code":   http.StatusServiceUnavailable,
+			"detail": "Jupyter Server is not initialized. Please ensure jupyter-server is installed.",
+		})
+		return
+	}
+
 	var req RunPythonRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{

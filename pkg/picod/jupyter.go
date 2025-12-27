@@ -24,6 +24,7 @@ type JupyterManager struct {
 	kernelID     string
 	wsConn       *websocket.Conn
 	mutex        sync.Mutex // Ensures single execution at a time
+	resetMutex   sync.Mutex // Ensures reset completes before next execution
 	token        string
 	workspaceDir string
 	httpClient   *http.Client
@@ -166,18 +167,34 @@ func (jm *JupyterManager) connectWebSocket() error {
 
 // ExecuteCode executes Python code and returns results (no timeout - blocks until completion)
 func (jm *JupyterManager) ExecuteCode(code string) (*ExecutionResult, error) {
+	// Wait for any pending reset to complete before starting new execution
+	jm.resetMutex.Lock()
+	resetComplete := true // Placeholder to avoid empty critical section
+	jm.resetMutex.Unlock()
+	_ = resetComplete
+
 	// Requirement 3: Acquire mutex for exclusive execution
 	jm.mutex.Lock()
 	defer jm.mutex.Unlock()
 
 	result, err := jm.executeViaWebSocket(code)
 
-	// Requirement 2: Soft reset environment using %reset -f
-	if resetErr := jm.softReset(); resetErr != nil {
-		klog.Errorf("Failed to soft reset kernel: %v", resetErr)
-	}
+	// Requirement 2: Soft reset environment using %reset -f asynchronously
+	// The reset will block the next execution but not the current response
+	go jm.asyncSoftReset()
 
 	return result, err
+}
+
+// asyncSoftReset performs soft reset asynchronously but blocks next execution
+func (jm *JupyterManager) asyncSoftReset() {
+	jm.resetMutex.Lock()
+	defer jm.resetMutex.Unlock()
+
+	resetCode := "%reset -f"
+	if _, err := jm.executeViaWebSocket(resetCode); err != nil {
+		klog.Errorf("Failed to soft reset kernel: %v", err)
+	}
 }
 
 // executeViaWebSocket executes code via Jupyter WebSocket (no timeout)
@@ -289,13 +306,6 @@ func (jm *JupyterManager) executeViaWebSocket(code string) (*ExecutionResult, er
 			return result, nil
 		}
 	}
-}
-
-// softReset performs soft reset using %reset -f magic command
-func (jm *JupyterManager) softReset() error {
-	resetCode := "%reset -f"
-	_, err := jm.executeViaWebSocket(resetCode)
-	return err
 }
 
 // Shutdown gracefully stops Jupyter Server

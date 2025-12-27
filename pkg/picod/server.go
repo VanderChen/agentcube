@@ -51,11 +51,15 @@ func NewServer(config Config) *Server {
 	}
 
 	// Initialize Jupyter Manager (Requirement 1: startup initialization)
+	// Only initialize if jupyter-server is available
 	jupyterMgr, err := NewJupyterManager(s.workspaceDir)
 	if err != nil {
-		klog.Fatalf("Failed to initialize Jupyter Manager: %v", err)
+		klog.Warningf("Failed to initialize Jupyter Manager (jupyter-server may not be installed): %v", err)
+		klog.Warning("Python code execution via /api/run_python will not be available")
+		s.jupyterManager = nil
+	} else {
+		s.jupyterManager = jupyterMgr
 	}
-	s.jupyterManager = jupyterMgr
 
 	// Disable Gin debug output in production mode
 	gin.SetMode(gin.ReleaseMode)
@@ -119,9 +123,11 @@ func (s *Server) Run() error {
 		signal.Notify(sigint, os.Interrupt, syscall.SIGTERM)
 		<-sigint
 
-		klog.Info("Shutting down Jupyter Manager...")
-		if err := s.jupyterManager.Shutdown(); err != nil {
-			klog.Errorf("Error shutting down Jupyter: %v", err)
+		if s.jupyterManager != nil {
+			klog.Info("Shutting down Jupyter Manager...")
+			if err := s.jupyterManager.Shutdown(); err != nil {
+				klog.Errorf("Error shutting down Jupyter: %v", err)
+			}
 		}
 
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
