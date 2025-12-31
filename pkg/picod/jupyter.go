@@ -169,25 +169,30 @@ func (jm *JupyterManager) connectWebSocket() error {
 func (jm *JupyterManager) ExecuteCode(code string) (*ExecutionResult, error) {
 	// Wait for any pending reset to complete before starting new execution
 	jm.resetMutex.Lock()
-	resetComplete := true // Placeholder to avoid empty critical section
 	jm.resetMutex.Unlock()
-	_ = resetComplete
 
 	// Requirement 3: Acquire mutex for exclusive execution
 	jm.mutex.Lock()
 	defer jm.mutex.Unlock()
 
 	result, err := jm.executeViaWebSocket(code)
+	if err != nil {
+		return result, err
+	}
 
 	// Requirement 2: Soft reset environment using %reset -f asynchronously
 	// The reset will block the next execution but not the current response
 	go jm.asyncSoftReset()
 
-	return result, err
+	return result, nil
 }
 
 // asyncSoftReset performs soft reset asynchronously but blocks next execution
 func (jm *JupyterManager) asyncSoftReset() {
+	// Wait for current execution to complete
+	jm.mutex.Lock()
+	defer jm.mutex.Unlock()
+
 	jm.resetMutex.Lock()
 	defer jm.resetMutex.Unlock()
 
