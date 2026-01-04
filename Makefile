@@ -76,15 +76,11 @@ build-agentd: generate ## Build agentd binary
 	@echo "Building agentd..."
 	go build -o bin/agentd ./cmd/agentd
 
-build-test-tunnel: ## Build test-tunnel tool
-	@echo "Building test-tunnel..."
-	go build -o bin/test-tunnel ./cmd/test-tunnel
-
 build-router: generate ## Build agentcube-router binary
 	@echo "Building agentcube-router..."
 	go build -o bin/agentcube-router ./cmd/router
 
-build-all: build build-agentd build-test-tunnel build-router ## Build all binaries
+build-all: build build-agentd build-router ## Build all binaries
 
 # Run server (development mode)
 run:
@@ -155,6 +151,7 @@ install: build
 # Docker image variables
 WORKLOAD_MANAGER_IMAGE ?= workloadmanager:latest
 ROUTER_IMAGE ?= agentcube-router:latest
+PICOD_IMAGE ?= picod:latest
 IMAGE_REGISTRY ?= ""
 
 # Docker and Kubernetes targets
@@ -252,28 +249,35 @@ k8s-logs-router:
 	@echo "Showing router logs..."
 	kubectl logs -n agentcube -l app=agentcube-router -f
 
-# Test targets
-test-tunnel:
-	@if [ -z "$(SESSION_ID)" ]; then \
-		echo "Error: SESSION_ID not set. Usage: make test-tunnel SESSION_ID=<session-id>"; \
+# Picod Docker targets
+docker-build-picod:
+	@echo "Building Picod Docker image..."
+	docker build -f docker/Dockerfile.picod -t $(PICOD_IMAGE) .
+
+# Multi-architecture build for picod (supports amd64, arm64)
+docker-buildx-picod:
+	@echo "Building multi-architecture Picod Docker image..."
+	docker buildx build -f docker/Dockerfile.picod --platform linux/amd64,linux/arm64 -t $(PICOD_IMAGE) .
+
+# Multi-architecture build and push for picod
+docker-buildx-push-picod:
+	@if [ -z "$(IMAGE_REGISTRY)" ]; then \
+		echo "Error: IMAGE_REGISTRY not set. Usage: make docker-buildx-push-picod IMAGE_REGISTRY=your-registry.com"; \
 		exit 1; \
 	fi
-	@echo "Testing tunnel for session $(SESSION_ID)..."
-	@go run ./cmd/test-tunnel/main.go -session $(SESSION_ID) -api $(API_URL) -token $(TOKEN)
+	@echo "Building and pushing multi-architecture Picod Docker image to $(IMAGE_REGISTRY)/$(PICOD_IMAGE)..."
+	docker buildx build -f docker/Dockerfile.picod --platform linux/amd64,linux/arm64 \
+		-t $(IMAGE_REGISTRY)/$(PICOD_IMAGE) \
+		--push .
 
-test-tunnel-build:
-	@echo "Building and running tunnel test..."
-	@make build-test-tunnel
-	@if [ -z "$(SESSION_ID)" ]; then \
-		echo "Error: SESSION_ID not set. Usage: make test-tunnel-build SESSION_ID=<session-id>"; \
+docker-push-picod: docker-build-picod
+	@if [ -z "$(IMAGE_REGISTRY)" ]; then \
+		echo "Error: IMAGE_REGISTRY not set. Usage: make docker-push-picod IMAGE_REGISTRY=your-registry.com"; \
 		exit 1; \
 	fi
-	./bin/test-tunnel -session $(SESSION_ID) -api $(API_URL) -token $(TOKEN)
-
-# Variables for test-tunnel
-API_URL ?= http://localhost:8080
-TOKEN ?= ""
-SESSION_ID ?= ""
+	@echo "Tagging and pushing Picod Docker image to $(IMAGE_REGISTRY)/$(PICOD_IMAGE)..."
+	docker tag $(PICOD_IMAGE) $(IMAGE_REGISTRY)/$(PICOD_IMAGE)
+	docker push $(IMAGE_REGISTRY)/$(PICOD_IMAGE)
 
 
 ##@ Dependencies
