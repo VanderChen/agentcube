@@ -132,42 +132,26 @@ class PicodClient:
         # Return SHA256 of canonical request
         return hashlib.sha256(canonical_request.encode()).hexdigest()
     
-    def initialize(self) -> bool:
-        """Initialize PicoD with session public key"""
-        if not self.bootstrap_private_key:
-            print("❌ Bootstrap key not loaded, cannot initialize")
-            return False
-        
-        print("\n🚀 Initializing PicoD...")
-        
-        # Create JWT with bootstrap key
-        session_public_key_b64 = self._get_public_key_pem(self.session_public_key)
-        token = self._create_jwt(self.bootstrap_private_key, {
-            'session_public_key': session_public_key_b64
-        })
-        
-        headers = {
-            'Authorization': f'Bearer {token}',
-            'Content-Type': 'application/json'
-        }
+    def check_initialized(self) -> bool:
+        """Check if PicoD is already initialized (static mode)"""
+        print("\n🔍 Checking PicoD initialization status...")
         
         try:
-            response = requests.post(
-                f"{self.base_url}/init",
-                headers=headers,
-                timeout=10
-            )
-            
-            if response.status_code == 200:
-                print("✅ PicoD initialized successfully")
+            health = self.health_check()
+            if health.get('initialized'):
+                print("✅ PicoD is already initialized (static mode)")
+                # In static mode, we use the session key (which is the same as bootstrap key)
+                # The public key is already loaded in PicoD via PICOD_PUBLIC_KEY env var
                 self.initialized = True
+                # Use session private key for signing (matches the mounted public key)
+                self.session_private_key = self.bootstrap_private_key
+                self.session_public_key = self.bootstrap_public_key
                 return True
             else:
-                print(f"❌ Initialization failed: {response.status_code}")
-                print(f"   Response: {response.text}")
+                print("⚠️  PicoD not initialized - dynamic mode requires /init call")
                 return False
         except Exception as e:
-            print(f"❌ Initialization error: {e}")
+            print(f"❌ Failed to check initialization: {e}")
             return False
     
     def _make_authenticated_request(self, method: str, path: str, 
@@ -588,9 +572,11 @@ def main():
                 print(f"\n   Please ensure PicoD is running at {picod_url}")
                 sys.exit(1)
     
-    # Initialize PicoD
-    if not client.initialize():
-        print("\n❌ Failed to initialize PicoD")
+    # Check if PicoD is initialized (static mode with mounted public key)
+    if not client.check_initialized():
+        print("\n⚠️  PicoD is not initialized")
+        print("   This test script expects PicoD to run in static mode with a mounted public key")
+        print("   The public key should match the private key used for signing JWTs")
         sys.exit(1)
     
     # Run tests
