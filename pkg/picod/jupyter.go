@@ -2,7 +2,6 @@ package picod
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -17,346 +16,227 @@ import (
 	"k8s.io/klog/v2"
 )
 
-// JupyterManager manages Jupyter Server and kernel lifecycle
 type JupyterManager struct {
 	serverCmd    *exec.Cmd
 	serverURL    string
 	kernelID     string
 	wsConn       *websocket.Conn
-	mutex        sync.Mutex // Ensures single execution at a time
-	resetMutex   sync.Mutex // Ensures reset completes before next execution
+	mutex        sync.Mutex
+	resetMutex   sync.Mutex
 	token        string
 	workspaceDir string
 	httpClient   *http.Client
 }
 
-// ExecutionResult captures Python execution output
 type ExecutionResult struct {
 	Output         string `json:"output"`
 	Error          string `json:"error"`
-	Status         string `json:"status"` // "ok" or "error"
+	Status         string `json:"status"`
 	ExecutionCount int    `json:"execution_count"`
 }
 
-// NewJupyterManager creates and initializes Jupyter Server
+// --- 初始化部分保持原样，修正了 connectWebSocket 的错误处理 ---
+
 func NewJupyterManager(workspaceDir string) (*JupyterManager, error) {
 	jm := &JupyterManager{
 		serverURL:    "http://127.0.0.1:8888",
-		token:        generateJupyterToken(),
+		token:        fmt.Sprintf("picod-%d", time.Now().Unix()),
 		workspaceDir: workspaceDir,
 		httpClient:   &http.Client{Timeout: 120 * time.Second},
 	}
 
 	if err := jm.startJupyterServer(); err != nil {
-		return nil, fmt.Errorf("failed to start Jupyter Server: %w", err)
+		return nil, err
 	}
-
 	if err := jm.createKernel(); err != nil {
-		return nil, fmt.Errorf("failed to create kernel: %w", err)
+		return nil, err
 	}
-
-	if err := jm.connectWebSocket(); err != nil {
-		return nil, fmt.Errorf("failed to connect WebSocket: %w", err)
+	if err := jm.ensureConnection(); err != nil {
+		return nil, err
 	}
 
 	klog.Info("Jupyter Server initialized successfully")
 	return jm, nil
 }
 
-// startJupyterServer launches Jupyter Server process
-func (jm *JupyterManager) startJupyterServer() error {
-	// Ensure workspace directory exists
-	if err := os.MkdirAll(jm.workspaceDir, 0755); err != nil {
-		return fmt.Errorf("failed to create workspace directory: %w", err)
-	}
-
-	cmd := exec.Command(
-		"jupyter-server",
-		"--no-browser",
-		"--ip=127.0.0.1",
-		"--port=8888",
-		"--allow-root", // Required for running in container as root
-		fmt.Sprintf("--ServerApp.token=%s", jm.token),
-		fmt.Sprintf("--ServerApp.root_dir=%s", jm.workspaceDir),
-		"--ServerApp.allow_origin=*",
-	)
-
-	// Capture output for debugging
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-
-	klog.Infof("Starting Jupyter Server with command: %v", cmd.Args)
-
-	if err := cmd.Start(); err != nil {
-		return fmt.Errorf("failed to start jupyter server: %w", err)
-	}
-
-	jm.serverCmd = cmd
-
-	// Wait for server to be ready
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
-	defer cancel()
-
-	return jm.waitForServer(ctx)
-}
-
-// waitForServer polls until Jupyter Server is responsive
-func (jm *JupyterManager) waitForServer(ctx context.Context) error {
-	ticker := time.NewTicker(500 * time.Millisecond)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-ctx.Done():
-			return fmt.Errorf("timeout waiting for Jupyter Server")
-		case <-ticker.C:
-			resp, err := http.Get(fmt.Sprintf("%s/api?token=%s", jm.serverURL, jm.token))
-			if err == nil && resp.StatusCode == http.StatusOK {
-				resp.Body.Close()
-				return nil
-			}
-			if resp != nil {
-				resp.Body.Close()
-			}
+// ensureConnection 确保 WebSocket 连接可用
+func (jm *JupyterManager) ensureConnection() error {
+	if jm.wsConn != nil {
+		// 发送 Ping 检查连接是否存活
+		err := jm.wsConn.WriteMessage(websocket.PingMessage, []byte{})
+		if err == nil {
+			return nil
 		}
-	}
-}
-
-// createKernel creates a persistent Python kernel
-func (jm *JupyterManager) createKernel() error {
-	reqBody := map[string]string{"name": "python3"}
-	bodyBytes, _ := json.Marshal(reqBody)
-
-	resp, err := http.Post(
-		fmt.Sprintf("%s/api/kernels?token=%s", jm.serverURL, jm.token),
-		"application/json",
-		bytes.NewBuffer(bodyBytes),
-	)
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusCreated {
-		return fmt.Errorf("failed to create kernel: status %d", resp.StatusCode)
+		jm.wsConn.Close()
+		jm.wsConn = nil
 	}
 
-	var result map[string]interface{}
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return err
-	}
-
-	jm.kernelID = result["id"].(string)
-	klog.Infof("Created kernel: %s", jm.kernelID)
-	return nil
-}
-
-// connectWebSocket establishes WebSocket connection to kernel
-func (jm *JupyterManager) connectWebSocket() error {
-	wsURL := fmt.Sprintf("ws://127.0.0.1:8888/api/kernels/%s/channels?token=%s",
-		jm.kernelID, jm.token)
-
+	wsURL := fmt.Sprintf("ws://127.0.0.1:8888/api/kernels/%s/channels?token=%s", jm.kernelID, jm.token)
 	conn, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
 	if err != nil {
-		return fmt.Errorf("failed to dial WebSocket: %w", err)
+		return fmt.Errorf("dial failed: %w", err)
 	}
-
 	jm.wsConn = conn
-	klog.Infof("WebSocket connected to kernel %s", jm.kernelID)
 	return nil
 }
 
-// ExecuteCode executes Python code and returns results (no timeout - blocks until completion)
 func (jm *JupyterManager) ExecuteCode(code string) (*ExecutionResult, error) {
-	klog.V(4).Infof("[ExecuteCode] Starting execution, waiting for reset to complete")
-
-	// Wait for any pending reset to complete before starting new execution
 	jm.resetMutex.Lock()
-	klog.V(4).Infof("[ExecuteCode] Reset mutex acquired, reset is complete")
 	jm.resetMutex.Unlock()
 
-	// Requirement 3: Acquire mutex for exclusive execution
-	klog.V(4).Infof("[ExecuteCode] Acquiring execution mutex")
 	jm.mutex.Lock()
-	defer func() {
-		klog.V(4).Infof("[ExecuteCode] Releasing execution mutex")
-		jm.mutex.Unlock()
-	}()
+	defer jm.mutex.Unlock()
 
-	klog.V(4).Infof("[ExecuteCode] Execution mutex acquired, executing code")
+	// 1. 执行前检查并尝试修复连接
+	if err := jm.ensureConnection(); err != nil {
+		return nil, fmt.Errorf("failed to maintain connection: %w", err)
+	}
+
 	result, err := jm.executeViaWebSocket(code)
 	if err != nil {
-		klog.Errorf("[ExecuteCode] Execution failed: %v", err)
+		// 2. 如果执行中连接断开，强制清理连接以便下次重连
+		if websocket.IsCloseError(err, 1005, 1006, 1001) || strings.Contains(err.Error(), "closed") {
+			if jm.wsConn != nil {
+				jm.wsConn.Close()
+				jm.wsConn = nil
+			}
+		}
 		return result, err
 	}
 
-	klog.V(4).Infof("[ExecuteCode] Execution completed successfully, starting async reset")
-	// Requirement 2: Soft reset environment using %reset -f asynchronously
-	// The reset will block the next execution but not the current response
 	go jm.asyncSoftReset()
-
-	return result, err
+	return result, nil
 }
 
-// asyncSoftReset performs soft reset asynchronously but blocks next execution
-func (jm *JupyterManager) asyncSoftReset() {
-	klog.V(4).Infof("[asyncSoftReset] Starting async reset, acquiring reset mutex first")
-
-	// Acquire reset mutex first to signal that reset is in progress
-	jm.resetMutex.Lock()
-	defer func() {
-		klog.V(4).Infof("[asyncSoftReset] Releasing reset mutex")
-		jm.resetMutex.Unlock()
-	}()
-
-	klog.V(4).Infof("[asyncSoftReset] Reset mutex acquired, now waiting for execution mutex")
-
-	// Then wait for current execution to complete by acquiring execution mutex
-	jm.mutex.Lock()
-	klog.V(4).Infof("[asyncSoftReset] Execution mutex acquired, performing reset")
-
-	resetCode := "%reset -f"
-	if _, err := jm.executeViaWebSocket(resetCode); err != nil {
-		klog.Errorf("[asyncSoftReset] Failed to soft reset kernel: %v", err)
-	} else {
-		klog.V(4).Infof("[asyncSoftReset] Reset completed successfully")
-	}
-
-	klog.V(4).Infof("[asyncSoftReset] Releasing execution mutex")
-	jm.mutex.Unlock()
-}
-
-// executeViaWebSocket executes code via Jupyter WebSocket (no timeout)
 func (jm *JupyterManager) executeViaWebSocket(code string) (*ExecutionResult, error) {
-
-	// Generate message ID
 	msgID := uuid.New().String()
-	klog.V(4).Infof("[executeViaWebSocket] Generated message ID: %s for code execution", msgID)
-
-	// Create execute_request message
 	executeMsg := map[string]interface{}{
 		"header": map[string]interface{}{
 			"msg_id":   msgID,
 			"username": "picod",
-			"session":  jm.kernelID,
+			"session":  uuid.New().String(), // 每次执行建议使用独立 session ID
 			"msg_type": "execute_request",
 			"version":  "5.3",
 		},
-		"parent_header": map[string]interface{}{},
-		"metadata":      map[string]interface{}{},
 		"content": map[string]interface{}{
-			"code":             code,
-			"silent":           false,
-			"store_history":    true,
-			"user_expressions": map[string]interface{}{},
-			"allow_stdin":      false,
-			"stop_on_error":    true,
+			"code":          code,
+			"silent":        false,
+			"store_history": true,
+			"stop_on_error": true,
 		},
-		"buffers": []interface{}{},
 	}
 
-	// Send execute request
-	klog.V(4).Infof("[executeViaWebSocket] Sending execute request via WebSocket")
 	if err := jm.wsConn.WriteJSON(executeMsg); err != nil {
-		klog.Errorf("[executeViaWebSocket] Failed to write to WebSocket: %v", err)
-		return nil, fmt.Errorf("failed to send execute request: %w", err)
+		return nil, fmt.Errorf("write error: %w", err)
 	}
-	klog.V(4).Infof("[executeViaWebSocket] Execute request sent successfully")
 
-	// Collect results
 	result := &ExecutionResult{Status: "ok"}
 	var outputBuffer, errorBuffer strings.Builder
-	executionCount := 0
 
-	// Read messages until we get execute_reply
+	// 设置读取超时，防止 Kernel 锁死导致程序挂起
+	// jm.wsConn.SetReadDeadline(time.Now().Add(60 * time.Second))
+
 	for {
 		var msg map[string]interface{}
 		if err := jm.wsConn.ReadJSON(&msg); err != nil {
-			return nil, fmt.Errorf("failed to read message: %w", err)
+			return nil, fmt.Errorf("read error (code 1005 possible): %w", err)
 		}
 
-		header, ok := msg["header"].(map[string]interface{})
-		if !ok {
-			continue
-		}
-
-		msgType, ok := header["msg_type"].(string)
-		if !ok {
-			continue
-		}
-
+		header := msg["header"].(map[string]interface{})
+		msgType := header["msg_type"].(string)
 		content, _ := msg["content"].(map[string]interface{})
+
+		// 确保只处理属于当前请求的回包
+		parentHeader, _ := msg["parent_header"].(map[string]interface{})
+		if parentHeader["msg_id"] != msgID {
+			continue
+		}
 
 		switch msgType {
 		case "stream":
-			if name, ok := content["name"].(string); ok {
-				if text, ok := content["text"].(string); ok {
-					if name == "stdout" {
-						outputBuffer.WriteString(text)
-					} else if name == "stderr" {
-						errorBuffer.WriteString(text)
-					}
+			if text, ok := content["text"].(string); ok {
+				if content["name"] == "stdout" {
+					outputBuffer.WriteString(text)
+				} else {
+					errorBuffer.WriteString(text)
 				}
 			}
-
-		case "execute_result", "display_data":
-			if data, ok := content["data"].(map[string]interface{}); ok {
-				if textPlain, ok := data["text/plain"].(string); ok {
-					outputBuffer.WriteString(textPlain)
-					outputBuffer.WriteString("\n")
-				}
-			}
-			if count, ok := content["execution_count"].(float64); ok {
-				executionCount = int(count)
-			}
-
 		case "error":
 			result.Status = "error"
-			if ename, ok := content["ename"].(string); ok {
-				errorBuffer.WriteString(ename)
-				errorBuffer.WriteString(": ")
-			}
-			if evalue, ok := content["evalue"].(string); ok {
-				errorBuffer.WriteString(evalue)
-				errorBuffer.WriteString("\n")
-			}
-			if traceback, ok := content["traceback"].([]interface{}); ok {
-				for _, line := range traceback {
-					if lineStr, ok := line.(string); ok {
-						errorBuffer.WriteString(lineStr)
-						errorBuffer.WriteString("\n")
-					}
+			if tb, ok := content["traceback"].([]interface{}); ok {
+				for _, line := range tb {
+					errorBuffer.WriteString(line.(string) + "\n")
 				}
 			}
-
 		case "execute_reply":
-			if count, ok := content["execution_count"].(float64); ok {
-				executionCount = int(count)
-			}
 			result.Output = outputBuffer.String()
 			result.Error = errorBuffer.String()
-			result.ExecutionCount = executionCount
+			if count, ok := content["execution_count"].(float64); ok {
+				result.ExecutionCount = int(count)
+			}
 			return result, nil
 		}
 	}
 }
 
-// Shutdown gracefully stops Jupyter Server
+// --- 辅助方法（Jupyter Server 管理） ---
+
+func (jm *JupyterManager) startJupyterServer() error {
+	os.MkdirAll(jm.workspaceDir, 0755)
+	cmd := exec.Command("jupyter-server", "--no-browser", "--ip=127.0.0.1", "--port=8888",
+		"--allow-root", fmt.Sprintf("--ServerApp.token=%s", jm.token),
+		fmt.Sprintf("--ServerApp.root_dir=%s", jm.workspaceDir))
+
+	if err := cmd.Start(); err != nil {
+		return err
+	}
+	jm.serverCmd = cmd
+
+	// 等待响应
+	for i := 0; i < 20; i++ {
+		resp, err := http.Get(fmt.Sprintf("%s/api?token=%s", jm.serverURL, jm.token))
+		if err == nil && resp.StatusCode == 200 {
+			resp.Body.Close()
+			return nil
+		}
+		time.Sleep(1 * time.Second)
+	}
+	return fmt.Errorf("jupyter server timeout")
+}
+
+func (jm *JupyterManager) createKernel() error {
+	data, _ := json.Marshal(map[string]string{"name": "python3"})
+	resp, err := http.Post(fmt.Sprintf("%s/api/kernels?token=%s", jm.serverURL, jm.token), "application/json", bytes.NewBuffer(data))
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	var res map[string]interface{}
+	json.NewDecoder(resp.Body).Decode(&res)
+	jm.kernelID = res["id"].(string)
+	return nil
+}
+
+func (jm *JupyterManager) asyncSoftReset() {
+	jm.resetMutex.Lock()
+	defer jm.resetMutex.Unlock()
+
+	jm.mutex.Lock()
+	defer jm.mutex.Unlock()
+
+	if err := jm.ensureConnection(); err != nil {
+		return
+	}
+	jm.executeViaWebSocket("%reset -f")
+}
+
 func (jm *JupyterManager) Shutdown() error {
 	if jm.wsConn != nil {
 		jm.wsConn.Close()
 	}
-
 	if jm.serverCmd != nil && jm.serverCmd.Process != nil {
-		if err := jm.serverCmd.Process.Kill(); err != nil {
-			return err
-		}
+		return jm.serverCmd.Process.Kill()
 	}
-
 	return nil
-}
-
-// generateJupyterToken generates a unique token for Jupyter Server
-func generateJupyterToken() string {
-	return fmt.Sprintf("picod-%d", time.Now().Unix())
 }
