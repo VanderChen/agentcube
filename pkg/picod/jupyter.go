@@ -168,18 +168,29 @@ func (jm *JupyterManager) connectWebSocket() error {
 
 // ExecuteCode executes Python code and returns results (no timeout - blocks until completion)
 func (jm *JupyterManager) ExecuteCode(code string) (*ExecutionResult, error) {
+	klog.V(4).Infof("[ExecuteCode] Starting execution, waiting for reset to complete")
+
 	// Wait for any pending reset to complete before starting new execution
 	jm.resetMutex.Lock()
-	resetComplete := true // Placeholder to avoid empty critical section
+	klog.V(4).Infof("[ExecuteCode] Reset mutex acquired, reset is complete")
 	jm.resetMutex.Unlock()
-	_ = resetComplete
 
 	// Requirement 3: Acquire mutex for exclusive execution
+	klog.V(4).Infof("[ExecuteCode] Acquiring execution mutex")
 	jm.mutex.Lock()
-	defer jm.mutex.Unlock()
+	defer func() {
+		klog.V(4).Infof("[ExecuteCode] Releasing execution mutex")
+		jm.mutex.Unlock()
+	}()
 
+	klog.V(4).Infof("[ExecuteCode] Execution mutex acquired, executing code")
 	result, err := jm.executeViaWebSocket(code)
+	if err != nil {
+		klog.Errorf("[ExecuteCode] Execution failed: %v", err)
+		return result, err
+	}
 
+	klog.V(4).Infof("[ExecuteCode] Execution completed successfully, starting async reset")
 	// Requirement 2: Soft reset environment using %reset -f asynchronously
 	// The reset will block the next execution but not the current response
 	go jm.asyncSoftReset()
@@ -189,13 +200,30 @@ func (jm *JupyterManager) ExecuteCode(code string) (*ExecutionResult, error) {
 
 // asyncSoftReset performs soft reset asynchronously but blocks next execution
 func (jm *JupyterManager) asyncSoftReset() {
+	klog.V(4).Infof("[asyncSoftReset] Starting async reset, acquiring reset mutex first")
+
+	// Acquire reset mutex first to signal that reset is in progress
 	jm.resetMutex.Lock()
-	defer jm.resetMutex.Unlock()
+	defer func() {
+		klog.V(4).Infof("[asyncSoftReset] Releasing reset mutex")
+		jm.resetMutex.Unlock()
+	}()
+
+	klog.V(4).Infof("[asyncSoftReset] Reset mutex acquired, now waiting for execution mutex")
+
+	// Then wait for current execution to complete by acquiring execution mutex
+	jm.mutex.Lock()
+	klog.V(4).Infof("[asyncSoftReset] Execution mutex acquired, performing reset")
 
 	resetCode := "%reset -f"
 	if _, err := jm.executeViaWebSocket(resetCode); err != nil {
-		klog.Errorf("Failed to soft reset kernel: %v", err)
+		klog.Errorf("[asyncSoftReset] Failed to soft reset kernel: %v", err)
+	} else {
+		klog.V(4).Infof("[asyncSoftReset] Reset completed successfully")
 	}
+
+	klog.V(4).Infof("[asyncSoftReset] Releasing execution mutex")
+	jm.mutex.Unlock()
 }
 
 // executeViaWebSocket executes code via Jupyter WebSocket (no timeout)
@@ -203,6 +231,7 @@ func (jm *JupyterManager) executeViaWebSocket(code string) (*ExecutionResult, er
 
 	// Generate message ID
 	msgID := uuid.New().String()
+	klog.V(4).Infof("[executeViaWebSocket] Generated message ID: %s for code execution", msgID)
 
 	// Create execute_request message
 	executeMsg := map[string]interface{}{
@@ -227,9 +256,12 @@ func (jm *JupyterManager) executeViaWebSocket(code string) (*ExecutionResult, er
 	}
 
 	// Send execute request
+	klog.V(4).Infof("[executeViaWebSocket] Sending execute request via WebSocket")
 	if err := jm.wsConn.WriteJSON(executeMsg); err != nil {
+		klog.Errorf("[executeViaWebSocket] Failed to write to WebSocket: %v", err)
 		return nil, fmt.Errorf("failed to send execute request: %w", err)
 	}
+	klog.V(4).Infof("[executeViaWebSocket] Execute request sent successfully")
 
 	// Collect results
 	result := &ExecutionResult{Status: "ok"}

@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"k8s.io/klog/v2"
 )
 
 // RunPythonRequest defines Python execution request
@@ -23,8 +24,11 @@ type RunPythonResponse struct {
 
 // RunPythonHandler handles Python code execution requests
 func (s *Server) RunPythonHandler(c *gin.Context) {
+	klog.V(4).Infof("[RunPythonHandler] Received Python execution request from %s", c.ClientIP())
+
 	// Check if Jupyter Manager is available
 	if s.jupyterManager == nil {
+		klog.Errorf("[RunPythonHandler] Jupyter Manager not available")
 		c.JSON(http.StatusServiceUnavailable, gin.H{
 			"error":  "Python code execution is not available",
 			"code":   http.StatusServiceUnavailable,
@@ -35,6 +39,7 @@ func (s *Server) RunPythonHandler(c *gin.Context) {
 
 	var req RunPythonRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
+		klog.Errorf("[RunPythonHandler] Failed to parse request: %v", err)
 		c.JSON(http.StatusBadRequest, gin.H{
 			"error": err.Error(),
 			"code":  http.StatusBadRequest,
@@ -42,18 +47,27 @@ func (s *Server) RunPythonHandler(c *gin.Context) {
 		return
 	}
 
+	klog.V(4).Infof("[RunPythonHandler] Code length: %d bytes", len(req.Code))
+	klog.V(4).Infof("[RunPythonHandler] Code preview: %.100s...", req.Code)
+
 	// Execute code without timeout (blocking until completion)
+	klog.V(4).Infof("[RunPythonHandler] Starting code execution")
 	start := time.Now()
 	result, err := s.jupyterManager.ExecuteCode(req.Code)
 	duration := time.Since(start).Seconds()
+	klog.V(4).Infof("[RunPythonHandler] Code execution completed in %.3f seconds", duration)
 
 	if err != nil {
+		klog.Errorf("[RunPythonHandler] Execution failed: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"error": err.Error(),
 			"code":  http.StatusInternalServerError,
 		})
 		return
 	}
+
+	klog.V(4).Infof("[RunPythonHandler] Execution result - Status: %s, ExecutionCount: %d, OutputLen: %d, ErrorLen: %d",
+		result.Status, result.ExecutionCount, len(result.Output), len(result.Error))
 
 	c.JSON(http.StatusOK, RunPythonResponse{
 		Output:         result.Output,
@@ -62,4 +76,6 @@ func (s *Server) RunPythonHandler(c *gin.Context) {
 		ExecutionCount: result.ExecutionCount,
 		Duration:       duration,
 	})
+
+	klog.V(4).Infof("[RunPythonHandler] Response sent successfully")
 }
