@@ -36,7 +36,6 @@ type Server struct {
 	engine         *gin.Engine
 	config         Config
 	authManager    *AuthManager
-	jupyterManager *JupyterManager
 	startTime      time.Time
 	workspaceDir   string
 	mu             sync.RWMutex // Protects lastActivityAt and ttl
@@ -75,17 +74,6 @@ func NewServer(config Config) *Server {
 			klog.Fatalf("Failed to get current working directory: %v", err)
 		}
 		s.setWorkspace(cwd)
-	}
-
-	// Initialize Jupyter Manager (Requirement 1: startup initialization)
-	// Only initialize if jupyter-server is available
-	jupyterMgr, err := NewJupyterManager(s.workspaceDir)
-	if err != nil {
-		klog.Warningf("Failed to initialize Jupyter Manager (jupyter-server may not be installed): %v", err)
-		klog.Warning("Python code execution via /api/run_python will not be available")
-		s.jupyterManager = nil
-	} else {
-		s.jupyterManager = jupyterMgr
 	}
 
 	// Disable Gin debug output in production mode
@@ -135,6 +123,7 @@ func NewServer(config Config) *Server {
 		api.GET("/files", s.ListFilesHandler)
 		api.GET("/files/*path", s.DownloadFileHandler)
 		api.POST("/run_python", s.RunPythonHandler)
+		api.POST("/run_python_file", s.RunPythonFileHandler)
 		api.PUT("/ttl", s.SetTTLHandler)
 	}
 
@@ -163,13 +152,6 @@ func (s *Server) Run() error {
 		sigint := make(chan os.Signal, 1)
 		signal.Notify(sigint, os.Interrupt, syscall.SIGTERM)
 		<-sigint
-
-		if s.jupyterManager != nil {
-			klog.Info("Shutting down Jupyter Manager...")
-			if err := s.jupyterManager.Shutdown(); err != nil {
-				klog.Errorf("Error shutting down Jupyter: %v", err)
-			}
-		}
 
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()

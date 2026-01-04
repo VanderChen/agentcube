@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"k8s.io/klog/v2"
 )
 
 const (
@@ -37,6 +38,7 @@ type ExecuteResponse struct {
 
 // ExecuteHandler handles command execution requests
 func (s *Server) ExecuteHandler(c *gin.Context) {
+	requestStart := time.Now()
 	var req ExecuteRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{
@@ -132,4 +134,7 @@ func (s *Server) ExecuteHandler(c *gin.Context) {
 		StartTime: start,
 		EndTime:   endTime,
 	})
+
+	klog.Infof("[ExecuteHandler] Request completed in %.3f seconds, command: %v, exit_code: %d",
+		time.Since(requestStart).Seconds(), req.Command, exitCode)
 }
