@@ -230,6 +230,7 @@ func (am *AuthManager) IsInitialized() bool {
 
 // InitHandler handles initialization requests
 func (am *AuthManager) InitHandler(c *gin.Context) {
+	requestStart := time.Now()
 	am.mutex.Lock()
 	defer am.mutex.Unlock()
 
@@ -323,6 +324,8 @@ func (am *AuthManager) InitHandler(c *gin.Context) {
 	c.JSON(http.StatusOK, InitResponse{
 		Message: "Server initialized successfully. This PicoD instance is now locked to your public key.",
 	})
+
+	klog.Infof("[InitHandler] Request completed in %.3f seconds", time.Since(requestStart).Seconds())
 }
 
 // AuthMiddleware creates authentication middleware with JWT verification

@@ -84,8 +84,12 @@ start_container() {
     fi
     
     # 启动容器（静态模式，直接挂载公钥）
-    # 将公钥转换为 base64 编码
-    PUBLIC_KEY_B64=$(base64 -w 0 "$BOOTSTRAP_PUBLIC_KEY")
+    # 将公钥转换为 base64 编码（macOS 使用不同的 base64 命令）
+    if [[ "$OSTYPE" == "darwin"* ]]; then
+        PUBLIC_KEY_B64=$(base64 -i "$BOOTSTRAP_PUBLIC_KEY")
+    else
+        PUBLIC_KEY_B64=$(base64 -w 0 "$BOOTSTRAP_PUBLIC_KEY")
+    fi
     
     docker run -d \
         --name "$CONTAINER_NAME" \

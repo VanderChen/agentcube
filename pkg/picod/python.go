@@ -24,6 +24,7 @@ type RunPythonResponse struct {
 
 // RunPythonHandler handles Python code execution requests
 func (s *Server) RunPythonHandler(c *gin.Context) {
+	requestStart := time.Now()
 	klog.V(4).Infof("[RunPythonHandler] Received Python execution request from %s", c.ClientIP())
 
 	// Check if Jupyter Manager is available
@@ -77,5 +78,7 @@ func (s *Server) RunPythonHandler(c *gin.Context) {
 		Duration:       duration,
 	})
 
+	klog.Infof("[RunPythonHandler] Request completed in %.3f seconds, status: %s, execution_count: %d",
+		time.Since(requestStart).Seconds(), result.Status, result.ExecutionCount)
 	klog.V(4).Infof("[RunPythonHandler] Response sent successfully")
 }

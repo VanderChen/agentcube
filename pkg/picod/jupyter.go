@@ -323,17 +323,52 @@ func (jm *JupyterManager) asyncSoftReset() {
 
 // executeViaWebSocket executes code via Jupyter WebSocket (no timeout)
 func (jm *JupyterManager) executeViaWebSocket(code string) (*ExecutionResult, error) {
-	// Check if reconnection is needed
-	jm.reconnectMutex.Lock()
-	if jm.wsConn == nil {
-		jm.reconnectMutex.Unlock()
-		return nil, fmt.Errorf("WebSocket connection is not available")
-	}
-	jm.reconnectMutex.Unlock()
+	// Retry mechanism for handling reconnection scenarios
+	maxRetries := 3
+	retryDelay := 1 * time.Second
 
+	for attempt := 1; attempt <= maxRetries; attempt++ {
+		if attempt > 1 {
+			klog.Infof("[executeViaWebSocket] Retry attempt %d/%d after connection failure", attempt, maxRetries)
+			time.Sleep(retryDelay)
+		}
+
+		// Check if reconnection is needed
+		jm.reconnectMutex.Lock()
+		if jm.wsConn == nil {
+			jm.reconnectMutex.Unlock()
+			if attempt < maxRetries {
+				klog.Warningf("[executeViaWebSocket] WebSocket connection is not available, waiting for reconnection (attempt %d/%d)", attempt, maxRetries)
+				continue
+			}
+			return nil, fmt.Errorf("WebSocket connection is not available after %d attempts", maxRetries)
+		}
+		jm.reconnectMutex.Unlock()
+
+		// Try to execute the code
+		result, err := jm.executeViaWebSocketOnce(code)
+		if err != nil {
+			// Check if error is due to connection issue
+			if strings.Contains(err.Error(), "WebSocket") || strings.Contains(err.Error(), "connection") {
+				if attempt < maxRetries {
+					klog.Warningf("[executeViaWebSocket] Connection error on attempt %d/%d: %v, retrying...", attempt, maxRetries, err)
+					continue
+				}
+			}
+			return nil, err
+		}
+
+		return result, nil
+	}
+
+	return nil, fmt.Errorf("failed to execute code after %d attempts", maxRetries)
+}
+
+// executeViaWebSocketOnce executes code via Jupyter WebSocket once (no retry)
+func (jm *JupyterManager) executeViaWebSocketOnce(code string) (*ExecutionResult, error) {
 	// Generate message ID
 	msgID := uuid.New().String()
-	klog.V(4).Infof("[executeViaWebSocket] Generated message ID: %s for code execution", msgID)
+	klog.V(4).Infof("[executeViaWebSocketOnce] Generated message ID: %s for code execution", msgID)
 
 	// Create execute_request message
 	executeMsg := map[string]interface{}{
@@ -358,17 +393,21 @@ func (jm *JupyterManager) executeViaWebSocket(code string) (*ExecutionResult, er
 	}
 
 	// Send execute request
-	klog.V(4).Infof("[executeViaWebSocket] Sending execute request via WebSocket")
+	klog.V(4).Infof("[executeViaWebSocketOnce] Sending execute request via WebSocket")
 	jm.reconnectMutex.Lock()
+	if jm.wsConn == nil {
+		jm.reconnectMutex.Unlock()
+		return nil, fmt.Errorf("WebSocket connection lost before sending request")
+	}
 	err := jm.wsConn.WriteJSON(executeMsg)
 	jm.reconnectMutex.Unlock()
 
 	if err != nil {
-		klog.Errorf("[executeViaWebSocket] Failed to write to WebSocket: %v, attempting reconnection", err)
-		jm.reconnectWebSocket()
+		klog.Errorf("[executeViaWebSocketOnce] Failed to write to WebSocket: %v, triggering reconnection", err)
+		go jm.reconnectWebSocket()
 		return nil, fmt.Errorf("failed to send execute request: %w", err)
 	}
-	klog.V(4).Infof("[executeViaWebSocket] Execute request sent successfully")
+	klog.V(4).Infof("[executeViaWebSocketOnce] Execute request sent successfully")
 
 	// Collect results
 	result := &ExecutionResult{Status: "ok"}
@@ -379,12 +418,16 @@ func (jm *JupyterManager) executeViaWebSocket(code string) (*ExecutionResult, er
 	for {
 		var msg map[string]interface{}
 		jm.reconnectMutex.Lock()
+		if jm.wsConn == nil {
+			jm.reconnectMutex.Unlock()
+			return nil, fmt.Errorf("WebSocket connection lost while reading messages")
+		}
 		err := jm.wsConn.ReadJSON(&msg)
 		jm.reconnectMutex.Unlock()
 
 		if err != nil {
-			klog.Errorf("Failed to read message from WebSocket: %v, attempting reconnection", err)
-			jm.reconnectWebSocket()
+			klog.Errorf("Failed to read message from WebSocket: %v, triggering reconnection", err)
+			go jm.reconnectWebSocket()
 			return nil, fmt.Errorf("failed to read message: %w", err)
 		}
 

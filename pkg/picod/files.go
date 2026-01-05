@@ -37,6 +37,7 @@ type UploadFileRequest struct {
 
 // UploadFileHandler handles file upload requests
 func (s *Server) UploadFileHandler(c *gin.Context) {
+	requestStart := time.Now()
 	contentType := c.ContentType()
 
 	// Determine request type: multipart or JSON
@@ -45,6 +46,8 @@ func (s *Server) UploadFileHandler(c *gin.Context) {
 	} else {
 		s.handleJSONBase64Upload(c)
 	}
+
+	klog.Infof("[UploadFileHandler] Request completed in %.3f seconds", time.Since(requestStart).Seconds())
 }
 
 func (s *Server) handleMultipartUpload(c *gin.Context) {
@@ -219,6 +222,7 @@ func (s *Server) handleJSONBase64Upload(c *gin.Context) {
 
 // DownloadFileHandler handles file download requests
 func (s *Server) DownloadFileHandler(c *gin.Context) {
+	requestStart := time.Now()
 	path := c.Param("path")
 	if path == "" {
 		c.JSON(http.StatusBadRequest, gin.H{
@@ -276,6 +280,9 @@ func (s *Server) DownloadFileHandler(c *gin.Context) {
 	c.Header("Content-Disposition", fmt.Sprintf("attachment; filename=\"%s\"", filepath.Base(safePath)))
 	c.Header("Content-Type", contentType)
 	c.File(safePath)
+
+	klog.Infof("[DownloadFileHandler] Request completed in %.3f seconds, path: %s, size: %d bytes",
+		time.Since(requestStart).Seconds(), path, fileInfo.Size())
 }
 
 // FileEntry defines a single file entry in the list response
@@ -294,6 +301,7 @@ type ListFilesResponse struct {
 
 // ListFilesHandler handles file listing requests
 func (s *Server) ListFilesHandler(c *gin.Context) {
+	requestStart := time.Now()
 	path := c.Query("path")
 	if path == "" {
 		c.JSON(http.StatusBadRequest, gin.H{
@@ -348,6 +356,9 @@ func (s *Server) ListFilesHandler(c *gin.Context) {
 	c.JSON(http.StatusOK, ListFilesResponse{
 		Files: files,
 	})
+
+	klog.Infof("[ListFilesHandler] Request completed in %.3f seconds, path: %s, files_count: %d",
+		time.Since(requestStart).Seconds(), path, len(files))
 }
 
 // parseFileMode parses file mode string
