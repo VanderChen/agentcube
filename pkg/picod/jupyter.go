@@ -333,17 +333,31 @@ func (jm *JupyterManager) executeViaWebSocket(code string) (*ExecutionResult, er
 			time.Sleep(retryDelay)
 		}
 
-		// Check if reconnection is needed
+		// Wait for any ongoing reconnection to complete before attempting execution
 		jm.reconnectMutex.Lock()
-		if jm.wsConn == nil {
-			jm.reconnectMutex.Unlock()
+		isReconnecting := jm.isReconnecting
+		wsConnAvailable := jm.wsConn != nil
+		jm.reconnectMutex.Unlock()
+
+		if isReconnecting {
+			if attempt < maxRetries {
+				klog.Warningf("[executeViaWebSocket] Reconnection in progress, waiting (attempt %d/%d)", attempt, maxRetries)
+				time.Sleep(retryDelay)
+				continue
+			}
+			return nil, fmt.Errorf("WebSocket reconnection in progress after %d attempts", maxRetries)
+		}
+
+		if !wsConnAvailable {
 			if attempt < maxRetries {
 				klog.Warningf("[executeViaWebSocket] WebSocket connection is not available, waiting for reconnection (attempt %d/%d)", attempt, maxRetries)
+				// Trigger reconnection if not already in progress
+				go jm.reconnectWebSocket()
+				time.Sleep(retryDelay * 2) // Wait longer for reconnection to complete
 				continue
 			}
 			return nil, fmt.Errorf("WebSocket connection is not available after %d attempts", maxRetries)
 		}
-		jm.reconnectMutex.Unlock()
 
 		// Try to execute the code
 		result, err := jm.executeViaWebSocketOnce(code)
