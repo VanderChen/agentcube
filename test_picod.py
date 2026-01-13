@@ -208,6 +208,15 @@ class PicodClient:
             json_data={'code': code}
         )
         return response.json()
+
+    def simple_run_python(self, code: str, timeout: str = "5m") -> Dict[str, Any]:
+        """Execute Python code using simple runner"""
+        response = self._make_authenticated_request(
+            'POST',
+            '/api/simple_run_python',
+            json_data={'code': code, 'timeout': timeout}
+        )
+        return response.json()
     
     def execute_command(self, command: list, timeout: str = "30s", 
                        working_dir: str = None) -> Dict[str, Any]:
@@ -456,6 +465,108 @@ def test_command_execution(client: PicodClient):
     return success_count == len(commands)
 
 
+def test_simple_python_execution(client: PicodClient):
+    """Test simple python execution"""
+    print_section("TEST 6: Simple Python Execution")
+    
+    code = """
+import sys
+import time
+import math
+import json
+
+def is_prime(n):
+    if n <= 1: return False
+    if n <= 3: return True
+    if n % 2 == 0 or n % 3 == 0: return False
+    i = 5
+    while i * i <= n:
+        if n % i == 0 or n % (i + 2) == 0: return False
+        i += 6
+    return True
+
+def fibonacci(n):
+    if n <= 0: return []
+    if n == 1: return [0]
+    sequence = [0, 1]
+    while len(sequence) < n:
+        sequence.append(sequence[-1] + sequence[-2])
+    return sequence
+
+class DataProcessor:
+    def __init__(self, data):
+        self.data = data
+    def process(self):
+        return [x*2 for x in self.data]
+
+def calculate_stats(numbers):
+    if not numbers:
+        return {"min": 0, "max": 0, "avg": 0}
+    return {
+        "min": min(numbers),
+        "max": max(numbers),
+        "avg": sum(numbers) / len(numbers)
+    }
+
+def main():
+    start_time = time.time()
+    primes = [x for x in range(100) if is_prime(x)]
+    fib = fibonacci(15)
+    
+    processor = DataProcessor(fib)
+    processed_fib = processor.process()
+    
+    stats = calculate_stats(processed_fib)
+    
+    # Extra calculations
+    matrix = []
+    for i in range(5):
+        row = []
+        for j in range(5):
+            row.append((i+1)*(j+1))
+        matrix.append(row)
+        
+    flattened = [val for sublist in matrix for val in sublist]
+    matrix_sum = sum(flattened)
+    
+    result = {
+        'primes_count': len(primes),
+        'fib_stats': stats,
+        'matrix_sum': matrix_sum,
+        'python_version': sys.version.split()[0],
+        'duration': time.time() - start_time
+    }
+    
+    print(json.dumps(result))
+
+if __name__ == '__main__':
+    main()
+"""
+    
+    encoded_code = base64.b64encode(code.encode('utf-8')).decode('utf-8')
+    
+    try:
+        print("  Running complex code...")
+        result = client.simple_run_python(encoded_code)
+        
+        if result.get('exit_code') == 0:
+             print(f"  ✅ Exit Code: 0")
+             # Try to parse output as JSON
+             try:
+                 output = json.loads(result.get('stdout'))
+                 print(f"     Output: {output}")
+             except:
+                 print(f"     Stdout: {result.get('stdout')[:100]}...")
+             return True
+        else:
+             print(f"  ❌ Exit Code: {result.get('exit_code')}")
+             print(f"     Stderr: {result.get('stderr')}")
+             return False
+    except Exception as e:
+        print(f"  ❌ Exception: {e}")
+        return False
+
+
 def test_python_with_file_io(client: PicodClient):
     """Test Python code that reads/writes files"""
     print_section("TEST 5: Python with File I/O")
@@ -587,6 +698,7 @@ def main():
     results.append(('File Operations', test_file_operations(client)))
     results.append(('Command Execution', test_command_execution(client)))
     results.append(('Python File I/O', test_python_with_file_io(client)))
+    results.append(('Simple Python Execution', test_simple_python_execution(client)))
     
     # Print summary
     print_section("TEST SUMMARY")

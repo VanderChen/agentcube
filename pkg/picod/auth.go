@@ -110,6 +110,7 @@ func (am *AuthManager) LoadStaticPublicKey() error {
 
 	am.publicKey = rsaPub
 	am.initialized = true
+	klog.Infof("Loaded static public key successfully. Modulus size: %d bits", rsaPub.N.BitLen())
 	return nil
 }
 

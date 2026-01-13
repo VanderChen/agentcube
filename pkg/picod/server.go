@@ -135,6 +135,7 @@ func NewServer(config Config) *Server {
 		api.GET("/files", s.ListFilesHandler)
 		api.GET("/files/*path", s.DownloadFileHandler)
 		api.POST("/run_python", s.RunPythonHandler)
+		api.POST("/simple_run_python", s.SimpleRunPythonHandler)
 		api.PUT("/ttl", s.SetTTLHandler)
 	}
 
