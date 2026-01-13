@@ -7,7 +7,9 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -57,11 +59,49 @@ func (s *Server) SimpleRunPythonHandler(c *gin.Context) {
 		}
 	}
 
-	// Execute code using python -c
+	// Save code to temporary file
+	tmpFile, err := os.CreateTemp(s.workspaceDir, "*.py")
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": fmt.Sprintf("Failed to create temporary file: %v", err),
+			"code":  http.StatusInternalServerError,
+		})
+		return
+	}
+	filePath := tmpFile.Name()
+	filename := filepath.Base(filePath)
+
+	klog.Infof("[SimpleRunPythonHandler] Saving code to file: %s", filename)
+	klog.Infof("[SimpleRunPythonHandler] Code content:\n%s", code)
+
+	defer func() {
+		if err := os.Remove(filePath); err != nil {
+			klog.Warningf("Failed to remove temporary file %s: %v", filePath, err)
+		}
+	}()
+
+	if _, err := tmpFile.Write([]byte(code)); err != nil {
+		tmpFile.Close()
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": fmt.Sprintf("Failed to write code to file: %v", err),
+			"code":  http.StatusInternalServerError,
+		})
+		return
+	}
+	if err := tmpFile.Close(); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": fmt.Sprintf("Failed to close temporary file: %v", err),
+			"code":  http.StatusInternalServerError,
+		})
+		return
+	}
+
+	// Execute code using python <file>
 	ctx, cancel := context.WithTimeout(context.Background(), timeoutDuration)
 	defer cancel()
 
-	cmd := exec.CommandContext(ctx, "python3", "-c", code)
+	cmd := exec.CommandContext(ctx, "python3", filename)
+	cmd.Dir = s.workspaceDir
 
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
