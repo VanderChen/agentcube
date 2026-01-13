@@ -465,6 +465,48 @@ def test_command_execution(client: PicodClient):
     return success_count == len(commands)
 
 
+def test_special_chars_execution(client: PicodClient):
+    """Test special characters execution"""
+    print_section("TEST 7: Special Characters Execution")
+    
+    code_samples = [
+        ("print('Single Quotes')", "Single Quotes"),
+        ('print("Double Quotes")', "Double Quotes"),
+        ('print("Mixed \'Single\' in Double")', "Mixed 'Single' in Double"),
+        ("print('Mixed \"Double\" in Single')", 'Mixed "Double" in Single'),
+        ('print("Line 1\\nLine 2")', "Line 1\nLine 2"),
+        ('print("""Multi\nLine\nString""")', "Multi\nLine\nString"),
+        ('print("Tab\\tSeparated")', "Tab\tSeparated"),
+        ('import sys; print(sys.version.split()[0])', None),
+        ('''
+def complex_print():
+    s1 = "Line 1 with 'single' quotes"
+    s2 = 'Line 2 with "double" quotes'
+    s3 = """Multiline
+    string
+    with "quotes" and 'quotes'"""
+    return s1 + "\\n" + s2 + "\\n" + s3
+print(complex_print())
+'''.strip(), "Line 1 with 'single' quotes\nLine 2 with \"double\" quotes\nMultiline\n    string\n    with \"quotes\" and 'quotes'")
+    ]
+    
+    for code, expected_output in code_samples:
+        print(f"  Testing code: {code[:40].replace(chr(10), ' ')}...")
+        encoded = base64.b64encode(code.encode()).decode()
+        result = client.simple_run_python(encoded)
+        if result.get('exit_code') != 0:
+             print(f"  ❌ Failed. Exit: {result.get('exit_code')}, Stderr: {result.get('stderr')}")
+             return False
+        
+        output = result.get('stdout').strip()
+        if expected_output and output != expected_output:
+             print(f"  ❌ Output Mismatch. Expected: {repr(expected_output)}, Got: {repr(output)}")
+             return False
+        print("  ✅ Pass")
+        
+    return True
+
+
 def test_simple_python_execution(client: PicodClient):
     """Test simple python execution"""
     print_section("TEST 6: Simple Python Execution")
@@ -699,6 +741,7 @@ def main():
     results.append(('Command Execution', test_command_execution(client)))
     results.append(('Python File I/O', test_python_with_file_io(client)))
     results.append(('Simple Python Execution', test_simple_python_execution(client)))
+    results.append(('Special Characters Execution', test_special_chars_execution(client)))
     
     # Print summary
     print_section("TEST SUMMARY")
