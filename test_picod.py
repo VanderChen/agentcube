@@ -21,6 +21,7 @@ import time
 import base64
 import hashlib
 import requests
+import concurrent.futures
 from datetime import datetime, timezone
 from typing import Dict, Any, Optional
 from cryptography.hazmat.primitives import hashes, serialization
@@ -729,6 +730,59 @@ if __name__ == '__main__':
         print(f"  ❌ Exception: {e}")
         return False
 
+def test_concurrency(client: PicodClient, concurrency: int = 10):
+    """Test concurrent execution of run_python"""
+    print_section(f"TEST 8: Concurrency Test (n={concurrency})")
+    
+    code = "print('Hello from concurrent thread')"
+    encoded_code = base64.b64encode(code.encode('utf-8')).decode('utf-8')
+    
+    success_count = 0
+    errors = []
+
+    def _run_request(idx):
+        try:
+            start = time.time()
+            result = client.simple_run_python(encoded_code)
+            duration = time.time() - start
+            return {
+                'idx': idx,
+                'success': result.get('exit_code') == 0,
+                'duration': duration,
+                'output': result.get('stdout', '').strip(),
+                'error': result.get('stderr', '')
+            }
+        except Exception as e:
+            return {
+                'idx': idx,
+                'success': False,
+                'error': str(e)
+            }
+
+    print(f"\n  🚀 Launching {concurrency} concurrent requests...")
+    start_total = time.time()
+    
+    with concurrent.futures.ThreadPoolExecutor(max_workers=concurrency) as executor:
+        futures = [executor.submit(_run_request, i) for i in range(concurrency)]
+        
+        for future in concurrent.futures.as_completed(futures):
+            res = future.result()
+            if res['success'] and "Hello from concurrent thread" in res['output']:
+                success_count += 1
+            else:
+                errors.append(res)
+                print(f"     ❌ Request {res['idx']} failed: {res.get('error')}")
+
+    total_duration = time.time() - start_total
+    print(f"\n  Summary: {success_count}/{concurrency} requests succeeded")
+    print(f"  Total Duration: {total_duration:.3f}s")
+    print(f"  Avg Request Duration: {total_duration/concurrency:.3f}s")
+    
+    if len(errors) > 0:
+        print(f"  First error sample: {errors[0]}")
+
+    return success_count == concurrency
+
 def main():
     """Main test runner"""
     print("""
@@ -742,9 +796,11 @@ def main():
     # Get configuration from environment or use defaults
     picod_url = os.getenv('PICOD_URL', 'http://localhost:8080')
     bootstrap_key = os.getenv('BOOTSTRAP_KEY_PATH', '/tmp/bootstrap_private_key.pem')
+    concurrency_level = int(os.getenv('CONCURRENCY_LEVEL', '10'))
     
     print(f"📍 PicoD URL: {picod_url}")
     print(f"🔑 Bootstrap Key: {bootstrap_key}")
+    print(f"🚀 Concurrency Level: {concurrency_level}")
     
     # Check if bootstrap key exists
     if not os.path.exists(bootstrap_key):
@@ -816,6 +872,7 @@ def main():
     results.append(('Python File Execution', test_run_python_file(client)))
     results.append(('Simple Python Execution', test_simple_python_execution(client)))
     results.append(('Special Characters Execution', test_special_chars_execution(client)))
+    results.append(('Concurrency Test', test_concurrency(client, concurrency=concurrency_level)))
     
     # Print summary
     print_section("TEST SUMMARY")
