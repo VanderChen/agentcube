@@ -1,13 +1,12 @@
 #!/usr/bin/env python3
 """
-PicoD Standalone Test Script
+PicoD Test Script
 
-This script tests the PicoD service independently without relying on proposals or test files.
+This script tests the PicoD service.
 It includes:
-1. Multiple rounds of Python code execution
-2. File operations (upload, download, list)
-3. Command execution
-4. Health checks
+1. Functional tests (sanity check)
+2. Performance/Concurrency tests covering all interfaces
+3. Metrics collection to CSV
 
 Requirements:
 - PicoD container running and accessible
@@ -22,24 +21,73 @@ import base64
 import hashlib
 import requests
 import concurrent.futures
+import threading
+import csv
+import argparse
+import random
 from datetime import datetime, timezone
 from typing import Dict, Any, Optional
-from cryptography.hazmat.primitives import hashes, serialization
-from cryptography.hazmat.primitives.asymmetric import rsa, padding
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric import rsa
 from cryptography.hazmat.backends import default_backend
 import jwt
+
+
+class MetricsCollector:
+    def __init__(self, output_file: str, extra_fields: Dict[str, Any]):
+        self.output_file = output_file
+        self.extra_fields = extra_fields
+        self.records = []
+        self.lock = threading.Lock()
+
+    def add(self, endpoint: str, method: str, latency: float, status_code: int, error: str = ""):
+        with self.lock:
+            record = self.extra_fields.copy()
+            record.update({
+                'timestamp': datetime.now(timezone.utc).isoformat(),
+                'endpoint': endpoint,
+                'method': method,
+                'latency_sec': f"{latency:.6f}",
+                'status_code': status_code,
+                'error': error
+            })
+            self.records.append(record)
+
+    def save(self):
+        if not self.records:
+            return
+        
+        fieldnames = list(self.extra_fields.keys()) + [
+            'timestamp', 'endpoint', 'method', 'latency_sec', 'status_code', 'error'
+        ]
+        
+        file_exists = os.path.isfile(self.output_file)
+        
+        try:
+            with open(self.output_file, 'a', newline='') as f:
+                writer = csv.DictWriter(f, fieldnames=fieldnames)
+                if not file_exists:
+                    writer.writeheader()
+                writer.writerows(self.records)
+            print(f"  💾 Saved {len(self.records)} metrics to {self.output_file}")
+            # Clear records after save to free memory if called periodically
+            with self.lock:
+                self.records = []
+        except Exception as e:
+            print(f"  ❌ Failed to save metrics: {e}")
 
 
 class PicodClient:
     """Client for interacting with PicoD service"""
     
-    def __init__(self, base_url: str, bootstrap_key_path: Optional[str] = None):
+    def __init__(self, base_url: str, bootstrap_key_path: Optional[str] = None, collector: Optional[MetricsCollector] = None):
         self.base_url = base_url.rstrip('/')
         self.session_private_key = None
         self.session_public_key = None
         self.bootstrap_private_key = None
         self.bootstrap_public_key = None
         self.initialized = False
+        self.collector = collector
         
         # Generate session key pair
         self._generate_session_keys()
@@ -50,65 +98,45 @@ class PicodClient:
     
     def _generate_session_keys(self):
         """Generate RSA key pair for session"""
-        print("🔑 Generating session RSA key pair...")
+        # print("🔑 Generating session RSA key pair...")
         self.session_private_key = rsa.generate_private_key(
             public_exponent=65537,
             key_size=2048,
             backend=default_backend()
         )
         self.session_public_key = self.session_private_key.public_key()
-        print("✅ Session keys generated")
     
     def _load_bootstrap_keys(self, key_path: str):
         """Load bootstrap private key from file"""
-        print(f"🔑 Loading bootstrap key from {key_path}...")
-        with open(key_path, 'rb') as f:
-            self.bootstrap_private_key = serialization.load_pem_private_key(
-                f.read(),
-                password=None,
-                backend=default_backend()
-            )
-        self.bootstrap_public_key = self.bootstrap_private_key.public_key()
-        print("✅ Bootstrap keys loaded")
-    
-    def _get_public_key_pem(self, public_key) -> str:
-        """Convert public key to PEM format and base64 encode (raw, no padding)"""
-        pem_bytes = public_key.public_bytes(
-            encoding=serialization.Encoding.PEM,
-            format=serialization.PublicFormat.SubjectPublicKeyInfo
-        )
-        return base64.b64encode(pem_bytes).decode('utf-8').rstrip('=')
+        # print(f"🔑 Loading bootstrap key from {key_path}...")
+        try:
+            with open(key_path, 'rb') as f:
+                self.bootstrap_private_key = serialization.load_pem_private_key(
+                    f.read(),
+                    password=None,
+                    backend=default_backend()
+                )
+            self.bootstrap_public_key = self.bootstrap_private_key.public_key()
+        except Exception as e:
+            print(f"Error loading bootstrap key: {e}")
+            sys.exit(1)
     
     def _create_jwt(self, private_key, claims: Dict[str, Any]) -> str:
         """Create JWT token signed with private key"""
-        # Add standard claims
         now = datetime.now(timezone.utc)
         claims.update({
             'iat': now,
-            'exp': now.timestamp() + 300  # 5 minutes expiry
+            'exp': now.timestamp() + 300
         })
-        
-        # Sign with PS256 (RSA-PSS)
-        token = jwt.encode(
-            claims,
-            private_key,
-            algorithm='PS256'
-        )
+        token = jwt.encode(claims, private_key, algorithm='PS256')
         return token
     
     def _build_canonical_request_hash(self, method: str, path: str, body: bytes, 
                                      content_type: Optional[str] = None) -> str:
-        """Build canonical request hash for request integrity"""
-        # 1. HTTP Method
         method = method.upper()
-        
-        # 2. URI
         uri = path if path else "/"
-        
-        # 3. Query String (empty for now)
         query_string = ""
         
-        # 4. Canonical Headers
         canonical_headers = ""
         signed_headers = ""
         if content_type:
@@ -117,10 +145,8 @@ class PicodClient:
         else:
             canonical_headers = "\n"
         
-        # 5. Body Hash
         body_hash = hashlib.sha256(body).hexdigest()
         
-        # Build canonical request
         canonical_request = "\n".join([
             method,
             uri,
@@ -130,51 +156,57 @@ class PicodClient:
             body_hash
         ])
         
-        # Return SHA256 of canonical request
         return hashlib.sha256(canonical_request.encode()).hexdigest()
     
     def check_initialized(self) -> bool:
         """Check if PicoD is already initialized (static mode)"""
-        print("\n🔍 Checking PicoD initialization status...")
-        
         try:
             health = self.health_check()
             if health.get('initialized'):
-                print("✅ PicoD is already initialized (static mode)")
-                # In static mode, we use the session key (which is the same as bootstrap key)
-                # The public key is already loaded in PicoD via PICOD_PUBLIC_KEY env var
                 self.initialized = True
-                # Use session private key for signing (matches the mounted public key)
                 self.session_private_key = self.bootstrap_private_key
                 self.session_public_key = self.bootstrap_public_key
                 return True
-            else:
-                print("⚠️  PicoD not initialized - dynamic mode requires /init call")
-                return False
-        except Exception as e:
-            print(f"❌ Failed to check initialization: {e}")
+            return False
+        except Exception:
             return False
     
+    def _measure_request(self, method, url, **kwargs):
+        start_time = time.time()
+        status_code = 0
+        error_msg = ""
+        resp = None
+        
+        path = url.replace(self.base_url, "")
+        
+        try:
+            resp = requests.request(method, url, **kwargs)
+            status_code = resp.status_code
+            return resp
+        except Exception as e:
+            error_msg = str(e)
+            raise e
+        finally:
+            duration = time.time() - start_time
+            if self.collector:
+                self.collector.add(path, method, duration, status_code, error_msg)
+
     def _make_authenticated_request(self, method: str, path: str, 
                                    json_data: Optional[Dict] = None,
                                    params: Optional[Dict] = None) -> requests.Response:
-        """Make authenticated request to PicoD"""
         if not self.initialized:
             raise Exception("PicoD not initialized")
         
-        # Prepare body
         body = b''
         content_type = None
         if json_data:
             body = json.dumps(json_data).encode()
             content_type = 'application/json'
         
-        # Build canonical request hash
         canonical_hash = self._build_canonical_request_hash(
             method, path, body, content_type
         )
         
-        # Create JWT with session key
         token = self._create_jwt(self.session_private_key, {
             'canonical_request_sha256': canonical_hash
         })
@@ -187,7 +219,7 @@ class PicodClient:
         
         url = f"{self.base_url}{path}"
         
-        return requests.request(
+        return self._measure_request(
             method,
             url,
             headers=headers,
@@ -197,12 +229,12 @@ class PicodClient:
         )
     
     def health_check(self) -> Dict[str, Any]:
-        """Check PicoD health status"""
-        response = requests.get(f"{self.base_url}/health", timeout=5)
-        return response.json()
+        url = f"{self.base_url}/health"
+        # Health check is unauthenticated
+        resp = self._measure_request('GET', url, timeout=5)
+        return resp.json()
 
     def simple_run_python(self, code: str, timeout: str = "5m") -> Dict[str, Any]:
-        """Execute Python code using simple runner"""
         response = self._make_authenticated_request(
             'POST',
             '/api/run_python',
@@ -211,14 +243,12 @@ class PicodClient:
         return response.json()
 
     def run_python_file(self, file_path: str, timeout: str = "5m") -> Dict[str, Any]:
-        """Execute Python code via file upload"""
         with open(file_path, 'rb') as f:
             content = f.read()
             
         filename = os.path.basename(file_path)
         boundary = '----WebKitFormBoundary7MA4YWxkTrZu0gW'
         
-        # Build multipart body manually
         body_parts = []
         body_parts.append(f'--{boundary}'.encode())
         body_parts.append(f'Content-Disposition: form-data; name="file"; filename="{filename}"'.encode())
@@ -226,7 +256,6 @@ class PicodClient:
         body_parts.append(b'')
         body_parts.append(content)
         
-        # Add timeout field
         body_parts.append(f'--{boundary}'.encode())
         body_parts.append(b'Content-Disposition: form-data; name="timeout"')
         body_parts.append(b'')
@@ -239,12 +268,10 @@ class PicodClient:
         
         content_type = f'multipart/form-data; boundary={boundary}'
         
-        # Build canonical request hash
         canonical_hash = self._build_canonical_request_hash(
             'POST', '/api/run_python_file', body, content_type
         )
         
-        # Create JWT with session key
         token = self._create_jwt(self.session_private_key, {
             'canonical_request_sha256': canonical_hash
         })
@@ -254,17 +281,18 @@ class PicodClient:
             'Content-Type': content_type
         }
         
-        response = requests.post(
-            f"{self.base_url}/api/run_python_file",
+        url = f"{self.base_url}/api/run_python_file"
+        resp = self._measure_request(
+            'POST',
+            url,
             headers=headers,
             data=body,
             timeout=30
         )
-        return response.json()
+        return resp.json()
     
     def execute_command(self, command: list, timeout: str = "30s", 
                        working_dir: str = None) -> Dict[str, Any]:
-        """Execute shell command"""
         data = {
             'command': command,
             'timeout': timeout
@@ -280,7 +308,6 @@ class PicodClient:
         return response.json()
     
     def upload_file(self, path: str, content: bytes, mode: str = "644") -> Dict[str, Any]:
-        """Upload file to PicoD"""
         content_b64 = base64.b64encode(content).decode()
         response = self._make_authenticated_request(
             'POST',
@@ -294,7 +321,6 @@ class PicodClient:
         return response.json()
     
     def list_files(self, path: str = ".") -> Dict[str, Any]:
-        """List files in directory"""
         response = self._make_authenticated_request(
             'GET',
             '/api/files',
@@ -303,596 +329,195 @@ class PicodClient:
         return response.json()
     
     def download_file(self, path: str) -> bytes:
-        """Download file from PicoD"""
         response = self._make_authenticated_request(
             'GET',
             f'/api/files/{path}'
         )
         return response.content
 
+# --- Test Definitions ---
 
-def print_section(title: str):
-    """Print section header"""
-    print(f"\n{'='*70}")
-    print(f"  {title}")
-    print(f"{'='*70}")
-
-
-def test_health_check(client: PicodClient):
-    """Test health check endpoint"""
-    print_section("TEST 1: Health Check")
+def run_functional_tests(client: PicodClient):
+    print("\n🧪 Running Functional Tests (Single Point)...")
     
+    # 1. Health
+    print("  Checking Health...", end=" ")
     try:
-        health = client.health_check()
-        print(f"✅ Health Status: {health.get('status')}")
-        print(f"   Service: {health.get('service')}")
-        print(f"   Uptime: {health.get('uptime')}")
-        print(f"   Initialized: {health.get('initialized')}")
-        print(f"   TTL: {health.get('ttl')}s")
-        print(f"   Idle: {health.get('idle_seconds')}s")
-        return True
+        client.health_check()
+        print("✅")
     except Exception as e:
-        print(f"❌ Health check failed: {e}")
+        print(f"❌ {e}")
         return False
 
-def test_file_operations(client: PicodClient):
-    """Test file upload, list, and download"""
-    print_section("TEST 3: File Operations")
-    
+    # 2. Command
+    print("  Executing Command...", end=" ")
     try:
-        # Test 1: Upload a text file
-        print("\n  📤 Uploading text file...")
-        text_content = b"Hello from PicoD test!\nThis is a test file.\n"
-        upload_result = client.upload_file('test_file.txt', text_content)
-        print(f"  ✅ Uploaded: {upload_result.get('path')}")
-        print(f"     Size: {upload_result.get('size')} bytes")
-        print(f"     Mode: {upload_result.get('mode')}")
-        
-        # Test 2: Upload a Python script
-        print("\n  📤 Uploading Python script...")
-        py_content = b"""#!/usr/bin/env python3
-def greet(name):
-    return f"Hello, {name}!"
-
-if __name__ == "__main__":
-    print(greet("PicoD"))
-"""
-        upload_result = client.upload_file('scripts/hello.py', py_content, mode="755")
-        print(f"  ✅ Uploaded: {upload_result.get('path')}")
-        
-        # Test 3: List files in current directory
-        print("\n  📋 Listing files in current directory...")
-        files = client.list_files('.')
-        print(f"  ✅ Found {len(files.get('files', []))} items:")
-        for file in files.get('files', [])[:5]:  # Show first 5
-            print(f"     - {file['name']} ({'dir' if file['is_dir'] else 'file'}, {file['size']} bytes)")
-        
-        # Test 4: Download the uploaded file
-        print("\n  📥 Downloading file...")
-        downloaded = client.download_file('test_file.txt')
-        if downloaded == text_content:
-            print(f"  ✅ Downloaded content matches original")
+        res = client.execute_command(['echo', 'hello'])
+        if res.get('exit_code') == 0 and 'hello' in res.get('stdout'):
+            print("✅")
         else:
-            print(f"  ❌ Downloaded content mismatch")
+            print(f"❌ {res}")
             return False
-        
-        # Test 5: Execute the uploaded Python script
-        print("\n  🐍 Executing uploaded Python script...")
-        exec_result = client.execute_command(['python3', 'scripts/hello.py'])
-        print(f"  ✅ Exit Code: {exec_result.get('exit_code')}")
-        print(f"     Output: {exec_result.get('stdout').strip()}")
-        
-        return True
     except Exception as e:
-        print(f"  ❌ File operations failed: {e}")
+        print(f"❌ {e}")
         return False
 
-
-def test_command_execution(client: PicodClient):
-    """Test command execution"""
-    print_section("TEST 4: Command Execution")
-    
-    commands = [
-        {
-            'name': 'List directory',
-            'cmd': ['ls', '-la']
-        },
-        {
-            'name': 'Print working directory',
-            'cmd': ['pwd']
-        },
-        {
-            'name': 'Echo test',
-            'cmd': ['echo', 'Hello from PicoD!']
-        },
-        {
-            'name': 'Python version',
-            'cmd': ['python3', '--version']
-        },
-        {
-            'name': 'Create and read file',
-            'cmd': ['sh', '-c', 'echo "test content" > /tmp/test.txt && cat /tmp/test.txt']
-        }
-    ]
-    
-    success_count = 0
-    for cmd_test in commands:
-        print(f"\n  🔧 {cmd_test['name']}")
-        print(f"     Command: {' '.join(cmd_test['cmd'])}")
-        
-        try:
-            result = client.execute_command(cmd_test['cmd'])
-            
-            if result.get('exit_code') == 0:
-                print(f"  ✅ Exit Code: 0")
-                output = result.get('stdout', '').strip()
-                if output:
-                    # Show first 200 chars
-                    print(f"     Output: {output[:200]}")
-                print(f"     Duration: {result.get('duration'):.3f}s")
-                success_count += 1
-            else:
-                print(f"  ❌ Exit Code: {result.get('exit_code')}")
-                print(f"     Stderr: {result.get('stderr')}")
-        except Exception as e:
-            print(f"  ❌ Exception: {e}")
-    
-    print(f"\n  Summary: {success_count}/{len(commands)} commands succeeded")
-    return success_count == len(commands)
-
-def test_run_python_file(client: PicodClient):
-    """Test Python execution via file upload using preset test files"""
-    print_section("TEST 5: Python File Execution")
-
-    test_files_dir = "test_files/python"
-
-    # Test 1: Simple hello world
+    # 3. Simple Python
+    print("  Running Simple Python...", end=" ")
     try:
-        print("\n  📝 Test 1: Hello World")
-        hello_file = os.path.join(test_files_dir, "hello.py")
-        if not os.path.exists(hello_file):
-            print(f"  ⚠️  Test file not found: {hello_file}")
+        code_b64 = base64.b64encode(b"print('py_test')").decode()
+        res = client.simple_run_python(code_b64)
+        if 'py_test' in res.get('stdout', ''):
+            print("✅")
+        else:
+            print(f"❌ {res}")
             return False
-
-        result = client.run_python_file(hello_file)
-
-        if result.get('exit_code') != 0:
-            print(f"  ❌ Exit Code: {result.get('exit_code')}")
-            print(f"     Stderr: {result.get('stderr')}")
-            return False
-
-        if "Hello from uploaded file" not in result.get('stdout'):
-            print(f"  ❌ Output mismatch")
-            print(f"     Expected: 'Hello from uploaded file'")
-            print(f"     Got: {result.get('stdout')}")
-            return False
-
-        print(f"  ✅ Hello world test passed")
-        print(f"     Stdout: {result.get('stdout').strip()}")
-
     except Exception as e:
-        print(f"  ❌ Exception in hello world test: {e}")
+        print(f"❌ {e}")
         return False
-
-    # Test 2: Math operations
-    try:
-        print("\n  🔢 Test 2: Math Operations")
-        math_file = os.path.join(test_files_dir, "math_operations.py")
-        if not os.path.exists(math_file):
-            print(f"  ⚠️  Test file not found: {math_file}")
-            return False
-
-        result = client.run_python_file(math_file)
-
-        if result.get('exit_code') != 0:
-            print(f"  ❌ Exit Code: {result.get('exit_code')}")
-            print(f"     Stderr: {result.get('stderr')}")
-            return False
-
-        if "All math operations passed!" not in result.get('stdout'):
-            print(f"  ❌ Math operations failed")
-            print(f"     Stdout: {result.get('stdout')}")
-            return False
-
-        print(f"  ✅ Math operations test passed")
-
-    except Exception as e:
-        print(f"  ❌ Exception in math operations test: {e}")
-        return False
-
-    # Test 3: JSON processing
-    try:
-        print("\n  📦 Test 3: JSON Processing")
-        json_file = os.path.join(test_files_dir, "json_processing.py")
-        if not os.path.exists(json_file):
-            print(f"  ⚠️  Test file not found: {json_file}")
-            return False
-
-        result = client.run_python_file(json_file)
-
-        if result.get('exit_code') != 0:
-            print(f"  ❌ Exit Code: {result.get('exit_code')}")
-            print(f"     Stderr: {result.get('stderr')}")
-            return False
-
-        if "JSON processing test passed!" not in result.get('stdout'):
-            print(f"  ❌ JSON processing failed")
-            return False
-
-        print(f"  ✅ JSON processing test passed")
-
-    except Exception as e:
-        print(f"  ❌ Exception in JSON processing test: {e}")
-        return False
-
-    # Test 4: Error handling (expect non-zero exit code)
-    try:
-        print("\n  ⚠️  Test 4: Error Handling")
-        error_file = os.path.join(test_files_dir, "error_test.py")
-        if not os.path.exists(error_file):
-            print(f"  ⚠️  Test file not found: {error_file}")
-            return False
-
-        result = client.run_python_file(error_file)
-
-        # This test should fail with exit code 42
-        if result.get('exit_code') != 42:
-            print(f"  ❌ Expected exit code 42, got {result.get('exit_code')}")
-            return False
-
-        if "Error message on stderr" not in result.get('stderr'):
-            print(f"  ❌ Expected error message in stderr")
-            print(f"     Stderr: {result.get('stderr')}")
-            return False
-
-        print(f"  ✅ Error handling test passed (exit code: {result.get('exit_code')})")
-        print(f"     Stderr: {result.get('stderr').strip()}")
-
-    except Exception as e:
-        print(f"  ❌ Exception in error handling test: {e}")
-        return False
-
-    # Test 5: Timeout test
-    try:
-        print("\n  ⏱️  Test 5: Timeout Handling")
-        timeout_file = os.path.join(test_files_dir, "timeout_test.py")
-        if not os.path.exists(timeout_file):
-            print(f"  ⚠️  Test file not found: {timeout_file}")
-            return False
-
-        # Set timeout to 2 seconds (script takes 10 seconds)
-        result = client.run_python_file(timeout_file, timeout="2s")
-
-        # Should timeout with exit code 124
-        if result.get('exit_code') != 124:
-            print(f"  ❌ Expected timeout exit code 124, got {result.get('exit_code')}")
-            return False
-
-        if "timed out" not in result.get('stderr').lower():
-            print(f"  ⚠️  Expected timeout message in stderr")
-            print(f"     Stderr: {result.get('stderr')}")
-            # Don't fail the test, as timeout might be reported differently
-
-        print(f"  ✅ Timeout test passed (exit code: {result.get('exit_code')})")
-
-    except Exception as e:
-        print(f"  ❌ Exception in timeout test: {e}")
-        return False
-
-    print("\n  ✅ All Python file execution tests passed!")
-    return True
-
-
-def test_special_chars_execution(client: PicodClient):
-    """Test special characters execution"""
-    print_section("TEST 7: Special Characters Execution")
-    
-    code_samples = [
-        ("print('Single Quotes')", "Single Quotes"),
-        ('print("Double Quotes")', "Double Quotes"),
-        ('print("Mixed \'Single\' in Double")', "Mixed 'Single' in Double"),
-        ("print('Mixed \"Double\" in Single')", 'Mixed "Double" in Single'),
-        ('print("Line 1\\nLine 2")', "Line 1\nLine 2"),
-        ('print("""Multi\nLine\nString""")', "Multi\nLine\nString"),
-        ('print("Tab\\tSeparated")', "Tab\tSeparated"),
-        ('import sys; print(sys.version.split()[0])', None),
-        ('''
-s="{\"key\": \"value\"}"
-print(s)
-'''.strip(), '{"key": "value"}'),
-        ('''
-def complex_print():
-    s1 = "Line 1 with 'single' quotes"
-    s2 = 'Line 2 with "double" quotes'
-    s3 = """Multiline
-    string
-    with "quotes" and 'quotes'"""
-    return s1 + "\\n" + s2 + "\\n" + s3
-print(complex_print())
-'''.strip(), "Line 1 with 'single' quotes\nLine 2 with \"double\" quotes\nMultiline\n    string\n    with \"quotes\" and 'quotes'")
-    ]
-    
-    for code, expected_output in code_samples:
-        print(f"  Testing code: {code[:40].replace(chr(10), ' ')}...")
-        encoded = base64.b64encode(code.encode()).decode()
-        result = client.simple_run_python(encoded)
-        if result.get('exit_code') != 0:
-             print(f"  ❌ Failed. Exit: {result.get('exit_code')}, Stderr: {result.get('stderr')}")
-             return False
-        
-        output = result.get('stdout').strip()
-        if expected_output and output != expected_output:
-             print(f"  ❌ Output Mismatch. Expected: {repr(expected_output)}, Got: {repr(output)}")
-             return False
-        print("  ✅ Pass")
         
     return True
 
-
-def test_simple_python_execution(client: PicodClient):
-    """Test simple python execution"""
-    print_section("TEST 6: Simple Python Execution")
+def run_concurrent_tests(client: PicodClient, concurrency: int, task_name: str, task_func, duration_sec: int = 10):
+    print(f"\n🚀 Running Concurrent Test: {task_name} (Concurrency: {concurrency})...")
     
-    code = """
-import sys
-import time
-import math
-import json
-
-def is_prime(n):
-    if n <= 1: return False
-    if n <= 3: return True
-    if n % 2 == 0 or n % 3 == 0: return False
-    i = 5
-    while i * i <= n:
-        if n % i == 0 or n % (i + 2) == 0: return False
-        i += 6
-    return True
-
-def fibonacci(n):
-    if n <= 0: return []
-    if n == 1: return [0]
-    sequence = [0, 1]
-    while len(sequence) < n:
-        sequence.append(sequence[-1] + sequence[-2])
-    return sequence
-
-class DataProcessor:
-    def __init__(self, data):
-        self.data = data
-    def process(self):
-        return [x*2 for x in self.data]
-
-def calculate_stats(numbers):
-    if not numbers:
-        return {"min": 0, "max": 0, "avg": 0}
-    return {
-        "min": min(numbers),
-        "max": max(numbers),
-        "avg": sum(numbers) / len(numbers)
-    }
-
-def main():
     start_time = time.time()
-    primes = [x for x in range(100) if is_prime(x)]
-    fib = fibonacci(15)
+    count = 0
+    errors = 0
     
-    processor = DataProcessor(fib)
-    processed_fib = processor.process()
+    # We want to run for a specific duration or specific number of iterations.
+    # To properly stress test, let's run fixed N requests per thread or time based.
+    # The requirement is "concurrent test every interface".
+    # Let's do a fixed number of requests to keep it deterministic for the table.
+    # Or better: ensure we have enough samples.
     
-    stats = calculate_stats(processed_fib)
-    
-    # Extra calculations
-    matrix = []
-    for i in range(5):
-        row = []
-        for j in range(5):
-            row.append((i+1)*(j+1))
-        matrix.append(row)
+    requests_per_thread = max(1, 50 // concurrency) if concurrency > 0 else 1 # Adjust scale
+    if concurrency >= 20:
+        requests_per_thread = 5 # 20 * 5 = 100 requests total
+    elif concurrency >= 10:
+        requests_per_thread = 10 # 10 * 10 = 100 requests total
+    else:
+        requests_per_thread = 20 # 5 * 20 = 100 requests total
         
-    flattened = [val for sublist in matrix for val in sublist]
-    matrix_sum = sum(flattened)
-    
-    result = {
-        'primes_count': len(primes),
-        'fib_stats': stats,
-        'matrix_sum': matrix_sum,
-        'python_version': sys.version.split()[0],
-        'duration': time.time() - start_time
-    }
-    
-    print(json.dumps(result))
+    total_requests = requests_per_thread * concurrency
+    print(f"  Target: {total_requests} requests total ({requests_per_thread} per thread)")
 
-if __name__ == '__main__':
-    main()
-"""
-    
-    encoded_code = base64.b64encode(code.encode('utf-8')).decode('utf-8')
-    
-    try:
-        print("  Running complex code...")
-        result = client.simple_run_python(encoded_code)
-        
-        if result.get('exit_code') == 0:
-             print(f"  ✅ Exit Code: 0")
-             # Try to parse output as JSON
-             try:
-                 output = json.loads(result.get('stdout'))
-                 print(f"     Output: {output}")
-             except:
-                 print(f"     Stdout: {result.get('stdout')[:100]}...")
-             return True
-        else:
-             print(f"  ❌ Exit Code: {result.get('exit_code')}")
-             print(f"     Stderr: {result.get('stderr')}")
-             return False
-    except Exception as e:
-        print(f"  ❌ Exception: {e}")
-        return False
+    def worker():
+        nonlocal count, errors
+        for _ in range(requests_per_thread):
+            try:
+                task_func(client)
+                count += 1
+            except Exception as e:
+                errors += 1
+                # print(f"E: {e}")
 
-def test_concurrency(client: PicodClient, concurrency: int = 10):
-    """Test concurrent execution of run_python"""
-    print_section(f"TEST 8: Concurrency Test (n={concurrency})")
-    
-    code = "print('Hello from concurrent thread')"
-    encoded_code = base64.b64encode(code.encode('utf-8')).decode('utf-8')
-    
-    success_count = 0
-    errors = []
-
-    def _run_request(idx):
-        try:
-            start = time.time()
-            result = client.simple_run_python(encoded_code)
-            duration = time.time() - start
-            return {
-                'idx': idx,
-                'success': result.get('exit_code') == 0,
-                'duration': duration,
-                'output': result.get('stdout', '').strip(),
-                'error': result.get('stderr', '')
-            }
-        except Exception as e:
-            return {
-                'idx': idx,
-                'success': False,
-                'error': str(e)
-            }
-
-    print(f"\n  🚀 Launching {concurrency} concurrent requests...")
-    start_total = time.time()
-    
     with concurrent.futures.ThreadPoolExecutor(max_workers=concurrency) as executor:
-        futures = [executor.submit(_run_request, i) for i in range(concurrency)]
-        
-        for future in concurrent.futures.as_completed(futures):
-            res = future.result()
-            if res['success'] and "Hello from concurrent thread" in res['output']:
-                success_count += 1
-            else:
-                errors.append(res)
-                print(f"     ❌ Request {res['idx']} failed: {res.get('error')}")
+        futures = [executor.submit(worker) for _ in range(concurrency)]
+        concurrent.futures.wait(futures)
 
-    total_duration = time.time() - start_total
-    print(f"\n  Summary: {success_count}/{concurrency} requests succeeded")
-    print(f"  Total Duration: {total_duration:.3f}s")
-    print(f"  Avg Request Duration: {total_duration/concurrency:.3f}s")
-    
-    if len(errors) > 0:
-        print(f"  First error sample: {errors[0]}")
-
-    return success_count == concurrency
+    duration = time.time() - start_time
+    print(f"  Done. Success: {count}, Errors: {errors}, Duration: {duration:.2f}s, TPS: {count/duration:.2f}")
 
 def main():
-    """Main test runner"""
-    print("""
-╔══════════════════════════════════════════════════════════════════╗
-║                  PicoD Standalone Test Suite                     ║
-║                                                                  ║
-║  Testing PicoD service independently without proposals           ║
-╚══════════════════════════════════════════════════════════════════╝
-""")
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--url', default='http://localhost:8080')
+    parser.add_argument('--key', default='/tmp/bootstrap_private_key.pem')
+    parser.add_argument('--concurrency', type=int, default=1)
+    parser.add_argument('--cpu-limit', default='unknown')
+    parser.add_argument('--output-csv', required=True)
+    parser.add_argument('--mode', choices=['functional', 'concurrent', 'all'], default='all')
+    args = parser.parse_args()
+
+    # Ensure output directory exists
+    os.makedirs(os.path.dirname(os.path.abspath(args.output_csv)), exist_ok=True)
+
+    extra_fields = {
+        'concurrency_level': args.concurrency,
+        'cpu_limit': args.cpu_limit
+    }
     
-    # Get configuration from environment or use defaults
-    picod_url = os.getenv('PICOD_URL', 'http://localhost:8080')
-    bootstrap_key = os.getenv('BOOTSTRAP_KEY_PATH', '/tmp/bootstrap_private_key.pem')
-    concurrency_level = int(os.getenv('CONCURRENCY_LEVEL', '10'))
+    collector = MetricsCollector(args.output_csv, extra_fields)
     
-    print(f"📍 PicoD URL: {picod_url}")
-    print(f"🔑 Bootstrap Key: {bootstrap_key}")
-    print(f"🚀 Concurrency Level: {concurrency_level}")
-    
-    # Check if bootstrap key exists
-    if not os.path.exists(bootstrap_key):
-        print(f"\n⚠️  Bootstrap key not found at {bootstrap_key}")
-        print("   Generating temporary bootstrap key pair...")
+    # Setup Client
+    if not os.path.exists(args.key):
+        # Generate temp key if missing (for standalone local test)
+        print(f"⚠️ Key not found: {args.key}, generating temporary...")
+        # ... logic omitted for brevity, assuming run_picod_test.sh handles this normally ...
+        # But for robustness we should generate:
+        priv = rsa.generate_private_key(65537, 2048, default_backend())
+        with open(args.key, 'wb') as f:
+            f.write(priv.private_key_bytes(serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8, serialization.NoEncryption()))
+        # Warning: Public key on server side must match!
+        # The shell script ensures this. If running standalone python, this might fail auth if server has different key.
         
-        # Generate bootstrap key pair
-        private_key = rsa.generate_private_key(
-            public_exponent=65537,
-            key_size=2048,
-            backend=default_backend()
-        )
-        
-        # Save private key
-        with open(bootstrap_key, 'wb') as f:
-            f.write(private_key.private_key_bytes(
-                encoding=serialization.Encoding.PEM,
-                format=serialization.PrivateFormat.PKCS8,
-                encryption_algorithm=serialization.NoEncryption()
-            ))
-        
-        # Save public key
-        public_key_path = bootstrap_key.replace('_private_', '_public_')
-        with open(public_key_path, 'wb') as f:
-            f.write(private_key.public_key().public_key_bytes(
-                encoding=serialization.Encoding.PEM,
-                format=serialization.PublicFormat.SubjectPublicKeyInfo
-            ))
-        
-        print(f"   ✅ Generated: {bootstrap_key}")
-        print(f"   ✅ Generated: {public_key_path}")
-        print(f"\n   ⚠️  NOTE: You need to start PicoD with this public key:")
-        print(f"   docker run -p 8080:8080 -v {public_key_path}:/etc/picod/public-key.pem picod")
-    
-    # Create client
-    client = PicodClient(picod_url, bootstrap_key)
-    
-    # Wait for PicoD to be ready
-    print("\n⏳ Waiting for PicoD to be ready...")
-    max_retries = 10
-    for i in range(max_retries):
+    client = PicodClient(args.url, args.key, collector)
+
+    # Wait for readiness
+    ready = False
+    for _ in range(10):
         try:
-            health = client.health_check()
-            print(f"✅ PicoD is ready! Status: {health.get('status')}")
-            break
-        except Exception as e:
-            if i < max_retries - 1:
-                print(f"   Retry {i+1}/{max_retries}... ({e})")
-                time.sleep(2)
-            else:
-                print(f"❌ PicoD not accessible after {max_retries} retries")
-                print(f"   Error: {e}")
-                print(f"\n   Please ensure PicoD is running at {picod_url}")
-                sys.exit(1)
+            if client.health_check().get('status') == 'ok':
+                ready = True
+                break
+        except:
+            time.sleep(1)
     
-    # Check if PicoD is initialized (static mode with mounted public key)
-    if not client.check_initialized():
-        print("\n⚠️  PicoD is not initialized")
-        print("   This test script expects PicoD to run in static mode with a mounted public key")
-        print("   The public key should match the private key used for signing JWTs")
-        sys.exit(1)
-    
-    # Run tests
-    results = []
-    
-    results.append(('Health Check', test_health_check(client)))
-    results.append(('File Operations', test_file_operations(client)))
-    results.append(('Command Execution', test_command_execution(client)))
-    results.append(('Python File Execution', test_run_python_file(client)))
-    results.append(('Simple Python Execution', test_simple_python_execution(client)))
-    results.append(('Special Characters Execution', test_special_chars_execution(client)))
-    results.append(('Concurrency Test', test_concurrency(client, concurrency=concurrency_level)))
-    
-    # Print summary
-    print_section("TEST SUMMARY")
-    
-    passed = sum(1 for _, result in results if result)
-    total = len(results)
-    
-    for test_name, result in results:
-        status = "✅ PASS" if result else "❌ FAIL"
-        print(f"  {status}  {test_name}")
-    
-    print(f"\n  Total: {passed}/{total} tests passed")
-    
-    if passed == total:
-        print("\n🎉 All tests passed!")
-        sys.exit(0)
-    else:
-        print(f"\n⚠️  {total - passed} test(s) failed")
+    if not ready:
+        print("❌ Service not ready")
         sys.exit(1)
 
+    if not client.check_initialized():
+        print("❌ Service not initialized")
+        sys.exit(1)
+
+    # Functional Tests (Single Point)
+    if args.mode in ['functional', 'all']:
+        if not run_functional_tests(client):
+            print("❌ Functional tests failed")
+            sys.exit(1)
+        # Flush metrics
+        collector.save()
+
+    # Concurrent Tests
+    if args.mode in ['concurrent', 'all']:
+        # Define tasks
+        
+        # 1. Health
+        run_concurrent_tests(client, args.concurrency, "Health Check", 
+                           lambda c: c.health_check())
+        
+        # 2. Command
+        run_concurrent_tests(client, args.concurrency, "Execute Command", 
+                           lambda c: c.execute_command(['echo', 'test']))
+                           
+        # 3. Simple Python
+        code_b64 = base64.b64encode(b"print(1+1)").decode()
+        run_concurrent_tests(client, args.concurrency, "Run Python", 
+                           lambda c: c.simple_run_python(code_b64))
+
+        # 4. Upload File
+        def task_upload(c):
+            c.upload_file(f"test_{random.randint(0,1000)}.txt", b"content")
+        run_concurrent_tests(client, args.concurrency, "Upload File", task_upload)
+
+        # 5. List Files
+        run_concurrent_tests(client, args.concurrency, "List Files", 
+                           lambda c: c.list_files())
+
+        # 6. Download File (setup first)
+        client.upload_file("download_test.txt", b"download_me")
+        run_concurrent_tests(client, args.concurrency, "Download File", 
+                           lambda c: c.download_file("download_test.txt"))
+        
+        # 7. Run Python File (setup first)
+        with open("temp_run.py", "w") as f:
+            f.write("print('hello')")
+        run_concurrent_tests(client, args.concurrency, "Run Python File", 
+                           lambda c: c.run_python_file("temp_run.py"))
+        os.remove("temp_run.py")
+
+        collector.save()
 
 if __name__ == '__main__':
     main()

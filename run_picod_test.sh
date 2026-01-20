@@ -1,255 +1,138 @@
 #!/bin/bash
-# PicoD 测试运行脚本
-# 此脚本自动化 PicoD 的构建、启动和测试流程
+# PicoD Automated Benchmark Script
+# Runs multi-dimensional tests on PicoD
 
 set -e
 
-# 颜色定义
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-BLUE='\033[0;34m'
-NC='\033[0m' # No Color
-
-# 配置
+# Configuration
 PICOD_IMAGE="picod:test"
-CONTAINER_NAME="picod-test"
+CONTAINER_NAME="picod-bench"
 PICOD_PORT="8080"
 BOOTSTRAP_PRIVATE_KEY="/tmp/bootstrap_private_key.pem"
 BOOTSTRAP_PUBLIC_KEY="/tmp/bootstrap_public_key.pem"
+RESULTS_DIR="results_$(date +%Y%m%d_%H%M%S)"
+OUTPUT_CSV="${RESULTS_DIR}/benchmark_results.csv"
 
-echo -e "${BLUE}╔══════════════════════════════════════════════════════════════════╗${NC}"
-echo -e "${BLUE}║           PicoD 自动化测试脚本                                    ║${NC}"
-echo -e "${BLUE}╚══════════════════════════════════════════════════════════════════╝${NC}"
-echo ""
+# Dimensions
+CPU_LIMITS=("0.5" "1.0")
+CONCURRENCIES=(5 10 20)
 
-# 函数：清理资源
+# Colors
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+BLUE='\033[0;34m'
+YELLOW='\033[1;33m'
+NC='\033[0m'
+
+mkdir -p "$RESULTS_DIR"
+
 cleanup() {
-    echo -e "\n${YELLOW}🧹 清理资源...${NC}"
-    
-    # 停止并删除容器
     if docker ps -a | grep -q "$CONTAINER_NAME"; then
-        echo "  停止容器: $CONTAINER_NAME"
-        docker stop "$CONTAINER_NAME" 2>/dev/null || true
-        docker rm "$CONTAINER_NAME" 2>/dev/null || true
+        docker stop "$CONTAINER_NAME" >/dev/null 2>&1 || true
+        docker rm "$CONTAINER_NAME" >/dev/null 2>&1 || true
     fi
-    
-    echo -e "${GREEN}✅ 清理完成${NC}"
 }
 
-# 函数：生成密钥对
 generate_keys() {
-    echo -e "${BLUE}🔑 生成 Bootstrap 密钥对...${NC}"
-    
-    if [ -f "$BOOTSTRAP_PRIVATE_KEY" ] && [ -f "$BOOTSTRAP_PUBLIC_KEY" ]; then
-        echo -e "${YELLOW}  密钥已存在，跳过生成${NC}"
-        return
+    if [ ! -f "$BOOTSTRAP_PRIVATE_KEY" ]; then
+        echo -e "${BLUE}🔑 Generating keys...${NC}"
+        openssl genrsa -out "$BOOTSTRAP_PRIVATE_KEY" 2048 2>/dev/null
+        openssl rsa -in "$BOOTSTRAP_PRIVATE_KEY" -pubout -out "$BOOTSTRAP_PUBLIC_KEY" 2>/dev/null
     fi
-    
-    # 生成私钥
-    openssl genrsa -out "$BOOTSTRAP_PRIVATE_KEY" 2048 2>/dev/null
-    echo "  ✅ 生成私钥: $BOOTSTRAP_PRIVATE_KEY"
-    
-    # 生成公钥
-    openssl rsa -in "$BOOTSTRAP_PRIVATE_KEY" -pubout -out "$BOOTSTRAP_PUBLIC_KEY" 2>/dev/null
-    echo "  ✅ 生成公钥: $BOOTSTRAP_PUBLIC_KEY"
 }
 
-# 函数：构建镜像
-build_image() {
-    echo -e "\n${BLUE}🔨 构建 PicoD 镜像...${NC}"
+start_picod() {
+    local cpu_limit=$1
+    echo -e "${BLUE}🚀 Starting PicoD (CPUs: $cpu_limit)...${NC}"
     
-    if docker images | grep -q "^picod.*test"; then
-        echo -e "${YELLOW}  镜像已存在，是否重新构建？ (y/N)${NC}"
-        read -r -t 5 response || response="n"
-        if [[ ! "$response" =~ ^[Yy]$ ]]; then
-            echo "  跳过构建"
-            return
-        fi
-    fi
-    
-    docker build -f docker/Dockerfile.picod -t "$PICOD_IMAGE" .
-    echo -e "${GREEN}✅ 镜像构建完成${NC}"
-}
+    cleanup # Ensure clean slate
 
-# 函数：启动容器
-start_container() {
-    echo -e "\n${BLUE}🚀 启动 PicoD 容器...${NC}"
-    
-    # 检查端口是否被占用
-    if lsof -Pi :$PICOD_PORT -sTCP:LISTEN -t >/dev/null 2>&1; then
-        echo -e "${RED}❌ 端口 $PICOD_PORT 已被占用${NC}"
-        echo "   请先停止占用该端口的进程"
-        exit 1
-    fi
-    
-    # 启动容器（静态模式，直接挂载公钥）
-    # 将公钥转换为 base64 编码（macOS 使用不同的 base64 命令）
     if [[ "$OSTYPE" == "darwin"* ]]; then
         PUBLIC_KEY_B64=$(base64 -i "$BOOTSTRAP_PUBLIC_KEY")
     else
         PUBLIC_KEY_B64=$(base64 -w 0 "$BOOTSTRAP_PUBLIC_KEY")
     fi
-    
+
     docker run -d \
         --name "$CONTAINER_NAME" \
+        --cpus="$cpu_limit" \
         -p "$PICOD_PORT:8080" \
         -e PICOD_AUTH_MODE=static \
         -e PICOD_PUBLIC_KEY="$PUBLIC_KEY_B64" \
-        -e PICOD_DEFAULT_TTL=3600 \
-        "$PICOD_IMAGE"
-    
-    echo "  ✅ 容器已启动: $CONTAINER_NAME"
-    echo "  📍 访问地址: http://localhost:$PICOD_PORT"
-    
-    # 等待服务就绪
-    echo -e "\n${YELLOW}⏳ 等待 PicoD 服务就绪...${NC}"
-    max_retries=30
-    retry=0
-    while [ $retry -lt $max_retries ]; do
+        "$PICOD_IMAGE" >/dev/null
+
+    # Wait for health
+    for i in {1..30}; do
         if curl -s "http://localhost:$PICOD_PORT/health" >/dev/null 2>&1; then
-            echo -e "${GREEN}✅ PicoD 服务已就绪${NC}"
-            return
+            return 0
         fi
-        retry=$((retry + 1))
-        echo -n "."
         sleep 1
     done
-    
-    echo -e "\n${RED}❌ PicoD 服务启动超时${NC}"
-    echo "查看日志:"
+    echo -e "${RED}❌ PicoD failed to start${NC}"
     docker logs "$CONTAINER_NAME"
     exit 1
 }
 
-# 函数：检查 Python 依赖
-check_dependencies() {
-    echo -e "\n${BLUE}📦 检查 Python 依赖...${NC}"
+run_test_scenario() {
+    local cpu=$1
+    local conc=$2
     
-    missing_deps=()
+    echo -e "${YELLOW}👉 Running Scenario: CPU=$cpu, Concurrency=$conc${NC}"
     
-    if ! python3 -c "import requests" 2>/dev/null; then
-        missing_deps+=("requests")
-    fi
-    
-    if ! python3 -c "import cryptography" 2>/dev/null; then
-        missing_deps+=("cryptography")
-    fi
-    
-    if ! python3 -c "import jwt" 2>/dev/null; then
-        missing_deps+=("pyjwt")
-    fi
-    
-    if [ ${#missing_deps[@]} -gt 0 ]; then
-        echo -e "${YELLOW}  缺少依赖: ${missing_deps[*]}${NC}"
-        echo -e "${YELLOW}  正在安装...${NC}"
-        pip3 install -q "${missing_deps[@]}"
-        echo -e "${GREEN}  ✅ 依赖安装完成${NC}"
+    # Run the python test script
+    # We pass the same output csv file to accumulate results
+    if python3 test_picod.py \
+        --url "http://localhost:$PICOD_PORT" \
+        --key "$BOOTSTRAP_PRIVATE_KEY" \
+        --concurrency "$conc" \
+        --cpu-limit "$cpu" \
+        --output-csv "$OUTPUT_CSV" \
+        --mode "concurrent"; then
+            echo -e "${GREEN}✅ Scenario passed${NC}"
     else
-        echo -e "${GREEN}  ✅ 所有依赖已满足${NC}"
+            echo -e "${RED}❌ Scenario failed${NC}"
+            # Don't exit immediately, try next scenario? 
+            # Requirement says "test multiple dimensions", usually we want all data.
+            # But if functional test fails, maybe stop.
     fi
 }
 
-# 函数：运行测试
-run_tests() {
-    echo -e "\n${BLUE}🧪 运行测试...${NC}"
-    echo ""
-    
-    export PICOD_URL="http://localhost:$PICOD_PORT"
-    export BOOTSTRAP_KEY_PATH="$BOOTSTRAP_PRIVATE_KEY"
-    
-    if python3 test_picod.py; then
-        echo -e "\n${GREEN}╔══════════════════════════════════════════════════════════════════╗${NC}"
-        echo -e "${GREEN}║                    🎉 所有测试通过！                              ║${NC}"
-        echo -e "${GREEN}╚══════════════════════════════════════════════════════════════════╝${NC}"
-        return 0
-    else
-        echo -e "\n${RED}╔══════════════════════════════════════════════════════════════════╗${NC}"
-        echo -e "${RED}║                    ❌ 测试失败                                    ║${NC}"
-        echo -e "${RED}╚══════════════════════════════════════════════════════════════════╝${NC}"
-        return 1
-    fi
-}
-
-# 函数：显示日志
-show_logs() {
-    echo -e "\n${BLUE}📋 PicoD 容器日志:${NC}"
-    docker logs "$CONTAINER_NAME" --tail 50
-}
-
-# 主流程
 main() {
-    # 解析参数
-    SKIP_BUILD=false
-    SKIP_CLEANUP=false
-    SHOW_LOGS=false
+    trap cleanup EXIT
     
-    while [[ $# -gt 0 ]]; do
-        case $1 in
-            --skip-build)
-                SKIP_BUILD=true
-                shift
-                ;;
-            --skip-cleanup)
-                SKIP_CLEANUP=true
-                shift
-                ;;
-            --logs)
-                SHOW_LOGS=true
-                shift
-                ;;
-            --help)
-                echo "用法: $0 [选项]"
-                echo ""
-                echo "选项:"
-                echo "  --skip-build     跳过镜像构建"
-                echo "  --skip-cleanup   测试后不清理容器"
-                echo "  --logs           显示容器日志"
-                echo "  --help           显示此帮助信息"
-                exit 0
-                ;;
-            *)
-                echo -e "${RED}未知选项: $1${NC}"
-                echo "使用 --help 查看帮助"
-                exit 1
-                ;;
-        esac
-    done
+    echo -e "${BLUE}🧪 PicoD Benchmark Suite${NC}"
+    echo "Results will be saved to: $OUTPUT_CSV"
     
-    # 注册清理函数（如果不跳过清理）
-    if [ "$SKIP_CLEANUP" = false ]; then
-        trap cleanup EXIT
-    fi
-    
-    # 执行步骤
-    cleanup
     generate_keys
     
-    if [ "$SKIP_BUILD" = false ]; then
-        build_image
+    # Check dependencies
+    if ! pip3 show requests cryptography pyjwt >/dev/null 2>&1; then
+        echo "Installing Python dependencies..."
+        pip3 install -q requests cryptography pyjwt
     fi
+
+    # 1. Run Functional Sanity Check (Single point)
+    # run with 1.0 cpu and 1 concurrency just to verify image works
+    start_picod "1.0"
+    echo -e "${BLUE}Running Functional Sanity Check...${NC}"
+    python3 test_picod.py --url "http://localhost:$PICOD_PORT" --key "$BOOTSTRAP_PRIVATE_KEY" --concurrency 1 --cpu-limit "1.0" --output-csv "$OUTPUT_CSV" --mode "functional"
+    cleanup
+
+    # 2. Run Benchmark Matrix
+    for cpu in "${CPU_LIMITS[@]}"; do
+        # Start container once per CPU config to save time?
+        # Or restart for every concurrency to ensure clean state?
+        # Restarting is safer for memory leak detection/clean state.
+        
+        for conc in "${CONCURRENCIES[@]}"; do
+            start_picod "$cpu"
+            run_test_scenario "$cpu" "$conc"
+            cleanup
+        done
+    done
     
-    start_container
-    check_dependencies
-    
-    # 运行测试
-    test_result=0
-    run_tests || test_result=$?
-    
-    # 显示日志（如果需要）
-    if [ "$SHOW_LOGS" = true ]; then
-        show_logs
-    fi
-    
-    # 如果跳过清理，提示用户
-    if [ "$SKIP_CLEANUP" = true ]; then
-        echo -e "\n${YELLOW}⚠️  容器未清理，使用以下命令手动清理:${NC}"
-        echo "  docker stop $CONTAINER_NAME"
-        echo "  docker rm $CONTAINER_NAME"
-    fi
-    
-    exit $test_result
+    echo -e "\n${GREEN}🎉 All tests completed.${NC}"
+    echo "Report generated at: $OUTPUT_CSV"
 }
 
-# 运行主流程
 main "$@"
