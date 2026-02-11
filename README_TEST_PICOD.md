@@ -11,6 +11,7 @@
 3. **文件操作** - 上传、下载、列表文件
 4. **命令执行** - 执行 shell 命令
 5. **Python 文件 I/O** - Python 代码读写文件
+6. **TTL 配置** - 更新和验证 TTL
 
 ## 前置要求
 
@@ -147,6 +148,14 @@ docker-compose -f docker-compose.test.yml down
 1. 使用 Python 创建 JSON 文件
 2. 使用 Python 读取 JSON 文件
 3. 通过 API 验证文件存在
+
+### 测试 6: TTL 配置
+
+测试 TTL（Time To Live）配置接口：
+
+1. **设置 TTL** - 通过 API 更新 TTL 值（例如 3600秒）
+2. **验证配置** - 通过健康检查接口验证 TTL 是否已更新
+3. **验证生效** - 确认系统状态反映新的 TTL 设置
 
 ## 测试输出示例
 

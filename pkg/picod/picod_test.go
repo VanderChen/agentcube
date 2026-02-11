@@ -360,6 +360,58 @@ func TestPicoD_EndToEnd(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, http.StatusUnauthorized, resp.StatusCode)
 	})
+
+	t.Run("TTL Configuration", func(t *testing.T) {
+		// Helper to make authenticated TTL requests
+		doSetTTL := func(ttl int64) (int, SetTTLRequest) {
+			reqBody := SetTTLRequest{TTL: ttl}
+			bodyBytes, _ := json.Marshal(reqBody)
+			
+			// TTL request needs body hash in claims
+			hash := sha256.Sum256(bodyBytes)
+			claims := jwt.MapClaims{
+				"body_sha256": fmt.Sprintf("%x", hash),
+				"iat":         time.Now().Unix(),
+				"exp":         time.Now().Add(time.Hour).Unix(),
+			}
+			token := createToken(t, sessionPriv, claims)
+
+			req, _ := http.NewRequest("PUT", ts.URL+"/api/ttl", bytes.NewBuffer(bodyBytes))
+			req.Header.Set("Authorization", "Bearer "+token)
+			req.Header.Set("Content-Type", "application/json")
+
+			resp, err := client.Do(req)
+			require.NoError(t, err)
+			
+			var respBody SetTTLRequest // Reusing struct for simplicity as response has similar fields usually or we just check status
+			// The handler returns {"message":..., "ttl":...}
+			// We can decode into a map or struct
+			if resp.StatusCode == http.StatusOK {
+				_ = json.NewDecoder(resp.Body).Decode(&respBody)
+			}
+			return resp.StatusCode, respBody
+		}
+
+		// 1. Valid TTL Update
+		status, _ := doSetTTL(3600)
+		assert.Equal(t, http.StatusOK, status)
+		
+		// Verify via health check
+		resp, err := client.Get(ts.URL + "/health")
+		require.NoError(t, err)
+		var health HealthResponse
+		err = json.NewDecoder(resp.Body).Decode(&health)
+		require.NoError(t, err)
+		assert.Equal(t, int64(3600), health.TTL)
+
+		// 2. Invalid TTL (Negative)
+		status, _ = doSetTTL(-1)
+		assert.Equal(t, http.StatusBadRequest, status)
+
+		// 3. Invalid TTL (Zero)
+		status, _ = doSetTTL(0)
+		assert.Equal(t, http.StatusBadRequest, status)
+	})
 }
 
 func TestPicoD_DefaultWorkspace(t *testing.T) {

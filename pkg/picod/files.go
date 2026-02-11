@@ -6,11 +6,13 @@ import (
 	"io"
 	"mime"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/gin-gonic/gin"
 	"k8s.io/klog/v2"
@@ -235,8 +237,17 @@ func (s *Server) DownloadFileHandler(c *gin.Context) {
 	// Remove leading /
 	path = strings.TrimPrefix(path, "/")
 
+	// Gin automatically decodes URL-encoded path parameters, but let's ensure it's properly decoded
+	// This handles cases where the path might be double-encoded or contain special characters
+	decodedPath, err := url.QueryUnescape(path)
+	if err != nil {
+		// If decoding fails, use the original path (it might already be decoded)
+		klog.V(4).Infof("Path decoding failed, using original: %v", err)
+		decodedPath = path
+	}
+
 	// Ensure path safety
-	safePath, err := s.sanitizePath(path)
+	safePath, err := s.sanitizePath(decodedPath)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{
 			"error": err.Error(),
@@ -275,14 +286,17 @@ func (s *Server) DownloadFileHandler(c *gin.Context) {
 		contentType = "application/octet-stream"
 	}
 
+	// Get the filename for Content-Disposition
+	filename := filepath.Base(safePath)
+
 	c.Header("Content-Description", "File Transfer")
 	c.Header("Content-Transfer-Encoding", "binary")
-	c.Header("Content-Disposition", fmt.Sprintf("attachment; filename=\"%s\"", filepath.Base(safePath)))
+	c.Header("Content-Disposition", encodeContentDisposition(filename))
 	c.Header("Content-Type", contentType)
 	c.File(safePath)
 
 	klog.Infof("[DownloadFileHandler] Request completed in %.3f seconds, path: %s, size: %d bytes",
-		time.Since(requestStart).Seconds(), path, fileInfo.Size())
+		time.Since(requestStart).Seconds(), decodedPath, fileInfo.Size())
 }
 
 // FileEntry defines a single file entry in the list response
@@ -387,6 +401,51 @@ func (s *Server) setWorkspace(dir string) {
 	} else {
 		s.workspaceDir = absDir
 	}
+}
+
+// encodeContentDisposition encodes the Content-Disposition header value with proper filename encoding
+// It follows RFC 2231 for non-ASCII filenames and RFC 6266 recommendations
+func encodeContentDisposition(filename string) string {
+	// Check if filename contains non-ASCII characters
+	needsEncoding := false
+	for _, r := range filename {
+		if r > unicode.MaxASCII {
+			needsEncoding = true
+			break
+		}
+	}
+
+	if !needsEncoding {
+		// Simple ASCII filename, use standard format with escaped quotes
+		escapedFilename := strings.ReplaceAll(filename, "\\", "\\\\")
+		escapedFilename = strings.ReplaceAll(escapedFilename, "\"", "\\\"")
+		return fmt.Sprintf(`attachment; filename="%s"`, escapedFilename)
+	}
+
+	// Non-ASCII filename: provide both ASCII fallback and UTF-8 encoded version
+	// RFC 2231 format: filename*=UTF-8''encoded_filename
+	// Also provide a simple ASCII fallback for older clients
+	asciiFilename := toASCII(filename)
+	escapedASCII := strings.ReplaceAll(asciiFilename, "\\", "\\\\")
+	escapedASCII = strings.ReplaceAll(escapedASCII, "\"", "\\\"")
+
+	// URL-encode the UTF-8 filename (RFC 2231)
+	encodedFilename := url.QueryEscape(filename)
+
+	return fmt.Sprintf(`attachment; filename="%s"; filename*=UTF-8''%s`, escapedASCII, encodedFilename)
+}
+
+// toASCII converts a string to ASCII by removing or replacing non-ASCII characters
+func toASCII(s string) string {
+	var result strings.Builder
+	for _, r := range s {
+		if r <= unicode.MaxASCII {
+			result.WriteRune(r)
+		} else {
+			result.WriteRune('_')
+		}
+	}
+	return result.String()
 }
 
 // sanitizePath ensures path is within allowed scope, preventing directory traversal attacks

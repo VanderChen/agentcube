@@ -335,6 +335,14 @@ class PicodClient:
         )
         return response.content
 
+    def set_ttl(self, ttl_seconds: int) -> Dict[str, Any]:
+        response = self._make_authenticated_request(
+            'PUT',
+            '/api/ttl',
+            json_data={'ttl': ttl_seconds}
+        )
+        return response.json()
+
 # --- Test Definitions ---
 
 def run_functional_tests(client: PicodClient):
@@ -369,6 +377,26 @@ def run_functional_tests(client: PicodClient):
         res = client.simple_run_python(code_b64)
         if 'py_test' in res.get('stdout', ''):
             print("✅")
+        else:
+            print(f"❌ {res}")
+            return False
+    except Exception as e:
+        print(f"❌ {e}")
+        return False
+
+    # 4. TTL
+    print("  Setting TTL...", end=" ")
+    try:
+        # Set to 1 hour
+        res = client.set_ttl(3600)
+        if res.get('ttl') == 3600:
+             # Verify via health
+             health = client.health_check()
+             if health.get('ttl') == 3600:
+                 print("✅")
+             else:
+                 print(f"❌ Health TTL mismatch: {health.get('ttl')}")
+                 return False
         else:
             print(f"❌ {res}")
             return False

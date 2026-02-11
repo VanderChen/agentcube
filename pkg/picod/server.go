@@ -81,6 +81,9 @@ func NewServer(config Config) *Server {
 
 	engine := gin.New()
 
+	// Set maximum multipart form memory to 64MB (default is 32MB)
+	engine.MaxMultipartMemory = 64 << 20 // 64 MB
+
 	// Global middleware
 	engine.Use(gin.Logger())   // Request logging
 	engine.Use(gin.Recovery()) // Crash recovery
