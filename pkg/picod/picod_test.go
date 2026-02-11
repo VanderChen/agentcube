@@ -2,8 +2,9 @@ package picod
 
 import (
 	"bytes"
+	"crypto/ecdsa"
+	"crypto/elliptic"
 	"crypto/rand"
-	"crypto/rsa"
 	"crypto/sha256"
 	"crypto/x509"
 	"encoding/base64"
@@ -24,9 +25,9 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// Helper to generate RSA key pair
-func generateRSAKeys(t *testing.T) (*rsa.PrivateKey, string) {
-	privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
+// Helper to generate EC key pair
+func generateECKeys(t *testing.T) (*ecdsa.PrivateKey, string) {
+	privateKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	require.NoError(t, err)
 	publicKey := &privateKey.PublicKey
 
@@ -41,8 +42,8 @@ func generateRSAKeys(t *testing.T) (*rsa.PrivateKey, string) {
 }
 
 // Helper to create signed JWT
-func createToken(t *testing.T, key *rsa.PrivateKey, claims jwt.MapClaims) string {
-	token := jwt.NewWithClaims(jwt.SigningMethodPS256, claims)
+func createToken(t *testing.T, key *ecdsa.PrivateKey, claims jwt.MapClaims) string {
+	token := jwt.NewWithClaims(jwt.SigningMethodES256, claims)
 	tokenString, err := token.SignedString(key)
 	require.NoError(t, err)
 	return tokenString
@@ -50,8 +51,8 @@ func createToken(t *testing.T, key *rsa.PrivateKey, claims jwt.MapClaims) string
 
 func TestPicoD_EndToEnd(t *testing.T) {
 	// 1. Setup Keys
-	bootstrapPriv, bootstrapPubStr := generateRSAKeys(t)
-	sessionPriv, sessionPubStr := generateRSAKeys(t)
+	bootstrapPriv, bootstrapPubStr := generateECKeys(t)
+	sessionPriv, sessionPubStr := generateECKeys(t)
 	// 2. Setup Server Environment
 	tmpDir, err := os.MkdirTemp("", "picod_test")
 	require.NoError(t, err)
@@ -366,7 +367,7 @@ func TestPicoD_EndToEnd(t *testing.T) {
 		doSetTTL := func(ttl int64) (int, SetTTLRequest) {
 			reqBody := SetTTLRequest{TTL: ttl}
 			bodyBytes, _ := json.Marshal(reqBody)
-			
+
 			// TTL request needs body hash in claims
 			hash := sha256.Sum256(bodyBytes)
 			claims := jwt.MapClaims{
@@ -382,7 +383,7 @@ func TestPicoD_EndToEnd(t *testing.T) {
 
 			resp, err := client.Do(req)
 			require.NoError(t, err)
-			
+
 			var respBody SetTTLRequest // Reusing struct for simplicity as response has similar fields usually or we just check status
 			// The handler returns {"message":..., "ttl":...}
 			// We can decode into a map or struct
@@ -395,7 +396,7 @@ func TestPicoD_EndToEnd(t *testing.T) {
 		// 1. Valid TTL Update
 		status, _ := doSetTTL(3600)
 		assert.Equal(t, http.StatusOK, status)
-		
+
 		// Verify via health check
 		resp, err := client.Get(ts.URL + "/health")
 		require.NoError(t, err)
@@ -428,7 +429,7 @@ func TestPicoD_DefaultWorkspace(t *testing.T) {
 	defer func() { require.NoError(t, os.Chdir(originalWd)) }()
 
 	// Initialize server with empty workspace
-	_, bootstrapPubStr := generateRSAKeys(t)
+	_, bootstrapPubStr := generateECKeys(t)
 	config := Config{
 		Port:         0,
 		BootstrapKey: []byte(bootstrapPubStr),
@@ -509,8 +510,8 @@ func TestPicoD_SetWorkspace(t *testing.T) {
 
 func TestPicoD_StaticKeyMode(t *testing.T) {
 	// 1. Setup Keys
-	_, bootstrapPubStr := generateRSAKeys(t)
-	staticPriv, staticPubStr := generateRSAKeys(t)
+	_, bootstrapPubStr := generateECKeys(t)
+	staticPriv, staticPubStr := generateECKeys(t)
 
 	// 2. Setup Server Environment
 	tmpDir, err := os.MkdirTemp("", "picod_static_test")
@@ -590,7 +591,7 @@ func TestDirectoryUploadDownload(t *testing.T) {
 	os.Unsetenv("PICOD_AUTH_MODE")
 
 	// Setup
-	privateKey, publicKeyStr := generateRSAKeys(t)
+	privateKey, publicKeyStr := generateECKeys(t)
 	tmpDir, err := os.MkdirTemp("", "picod_dir_test")
 	require.NoError(t, err)
 	defer os.RemoveAll(tmpDir)
@@ -615,7 +616,7 @@ func TestDirectoryUploadDownload(t *testing.T) {
 	client := ts.Client()
 
 	// Initialize server
-	sessionPriv, sessionPubStr := generateRSAKeys(t)
+	sessionPriv, sessionPubStr := generateECKeys(t)
 	sessionPubB64 := base64.RawStdEncoding.EncodeToString([]byte(sessionPubStr))
 	initClaims := jwt.MapClaims{
 		"session_public_key": sessionPubB64,
@@ -776,5 +777,27 @@ func TestDirectoryUploadDownload(t *testing.T) {
 		resp, err := client.Do(req)
 		require.NoError(t, err)
 		assert.Equal(t, http.StatusBadRequest, resp.StatusCode)
+	})
+}
+
+func TestParseECPublicKeyFromEncodedString(t *testing.T) {
+	privateKey, publicKeyPEM := generateECKeys(t)
+
+	t.Run("Base64PEM", func(t *testing.T) {
+		keyB64 := base64.StdEncoding.EncodeToString([]byte(publicKeyPEM))
+		parsed, err := parseECPublicKeyFromEncodedString(keyB64)
+		require.NoError(t, err)
+		assert.Equal(t, privateKey.PublicKey.X, parsed.X)
+		assert.Equal(t, privateKey.PublicKey.Y, parsed.Y)
+	})
+
+	t.Run("Base64DER", func(t *testing.T) {
+		der, err := x509.MarshalPKIXPublicKey(&privateKey.PublicKey)
+		require.NoError(t, err)
+		keyB64 := base64.StdEncoding.EncodeToString(der)
+		parsed, err := parseECPublicKeyFromEncodedString(keyB64)
+		require.NoError(t, err)
+		assert.Equal(t, privateKey.PublicKey.X, parsed.X)
+		assert.Equal(t, privateKey.PublicKey.Y, parsed.Y)
 	})
 }
