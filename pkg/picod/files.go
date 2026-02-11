@@ -1,6 +1,9 @@
 package picod
 
 import (
+	"archive/tar"
+	"archive/zip"
+	"compress/gzip"
 	"encoding/base64"
 	"fmt"
 	"io"
@@ -448,6 +451,261 @@ func toASCII(s string) string {
 	return result.String()
 }
 
+// UploadDirectoryRequest defines directory upload request body
+type UploadDirectoryRequest struct {
+	BasePath string     `json:"base_path"` // Base directory path (optional)
+	Files    []FileItem `json:"files" binding:"required,min=1"`
+}
+
+// FileItem defines a single file in directory upload
+type FileItem struct {
+	Path    string `json:"path" binding:"required"`
+	Content string `json:"content" binding:"required"` // Base64 encoded
+	Mode    string `json:"mode"`
+}
+
+// UploadDirectoryResponse defines directory upload response
+type UploadDirectoryResponse struct {
+	UploadedFiles []FileInfo `json:"uploaded_files"`
+	TotalFiles    int        `json:"total_files"`
+	TotalSize     int64      `json:"total_size"`
+}
+
+// UploadDirectoryHandler handles directory upload requests
+func (s *Server) UploadDirectoryHandler(c *gin.Context) {
+	requestStart := time.Now()
+	var req UploadDirectoryRequest
+
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": fmt.Sprintf("Invalid request: %v", err),
+			"code":  http.StatusBadRequest,
+		})
+		return
+	}
+
+	var uploadedFiles []FileInfo
+	var totalSize int64
+
+	// Process each file
+	for _, fileItem := range req.Files {
+		// Construct full path
+		fullPath := fileItem.Path
+		if req.BasePath != "" {
+			fullPath = filepath.Join(req.BasePath, fileItem.Path)
+		}
+
+		// Ensure path safety
+		safePath, err := s.sanitizePath(fullPath)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{
+				"error": fmt.Sprintf("Invalid path '%s': %v", fullPath, err),
+				"code":  http.StatusBadRequest,
+			})
+			return
+		}
+
+		// Decode Base64 content
+		decodedContent, err := base64.StdEncoding.DecodeString(fileItem.Content)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{
+				"error": fmt.Sprintf("Invalid base64 content for '%s': %v", fullPath, err),
+				"code":  http.StatusBadRequest,
+			})
+			return
+		}
+
+		// Create directory
+		dir := filepath.Dir(safePath)
+		if err := os.MkdirAll(dir, 0755); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{
+				"error": fmt.Sprintf("Failed to create directory for '%s': %v", fullPath, err),
+				"code":  http.StatusInternalServerError,
+			})
+			return
+		}
+
+		// Parse file permissions
+		fileMode := parseFileMode(fileItem.Mode)
+
+		// Write file
+		if err := os.WriteFile(safePath, decodedContent, fileMode); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{
+				"error": fmt.Sprintf("Failed to write file '%s': %v", fullPath, err),
+				"code":  http.StatusInternalServerError,
+			})
+			return
+		}
+
+		// Get file info
+		stat, err := os.Stat(safePath)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{
+				"error": fmt.Sprintf("Failed to get file info for '%s': %v", fullPath, err),
+				"code":  http.StatusInternalServerError,
+			})
+			return
+		}
+
+		relPath, err := filepath.Rel(s.workspaceDir, safePath)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{
+				"error": fmt.Sprintf("Failed to get relative path for '%s': %v", fullPath, err),
+				"code":  http.StatusInternalServerError,
+			})
+			return
+		}
+
+		uploadedFiles = append(uploadedFiles, FileInfo{
+			Path:     relPath,
+			Size:     stat.Size(),
+			Mode:     stat.Mode().String(),
+			Modified: stat.ModTime(),
+		})
+		totalSize += stat.Size()
+	}
+
+	c.JSON(http.StatusOK, UploadDirectoryResponse{
+		UploadedFiles: uploadedFiles,
+		TotalFiles:    len(uploadedFiles),
+		TotalSize:     totalSize,
+	})
+
+	klog.Infof("[UploadDirectoryHandler] Uploaded %d files, total size: %d bytes, completed in %.3f seconds",
+		len(uploadedFiles), totalSize, time.Since(requestStart).Seconds())
+}
+
+// DownloadDirectoryHandler handles directory download requests
+func (s *Server) DownloadDirectoryHandler(c *gin.Context) {
+	requestStart := time.Now()
+	path := c.Param("path")
+	if path == "" {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": "Missing directory path",
+			"code":  http.StatusBadRequest,
+		})
+		return
+	}
+
+	// Remove leading /
+	path = strings.TrimPrefix(path, "/")
+
+	// Decode URL-encoded path
+	decodedPath, err := url.QueryUnescape(path)
+	if err != nil {
+		klog.V(4).Infof("Path decoding failed, using original: %v", err)
+		decodedPath = path
+	}
+
+	// Ensure path safety
+	safePath, err := s.sanitizePath(decodedPath)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": err.Error(),
+			"code":  http.StatusBadRequest,
+		})
+		return
+	}
+
+	// Check if directory exists
+	fileInfo, err := os.Stat(safePath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			c.JSON(http.StatusNotFound, gin.H{
+				"error": "Directory not found",
+				"code":  http.StatusNotFound,
+			})
+		} else {
+			c.JSON(http.StatusInternalServerError, gin.H{
+				"error": fmt.Sprintf("Failed to get directory info: %v", err),
+				"code":  http.StatusInternalServerError,
+			})
+		}
+		return
+	}
+
+	if !fileInfo.IsDir() {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": "Path is not a directory",
+			"code":  http.StatusBadRequest,
+		})
+		return
+	}
+
+	// Get format from query parameter (default: tar.gz)
+	format := c.DefaultQuery("format", "tar.gz")
+	if format != "tar.gz" && format != "zip" {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": "Invalid format, must be 'tar.gz' or 'zip'",
+			"code":  http.StatusBadRequest,
+		})
+		return
+	}
+
+	// Create temporary file for archive
+	tmpFile, err := os.CreateTemp("", fmt.Sprintf("picod-download-*.%s", format))
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": fmt.Sprintf("Failed to create temporary file: %v", err),
+			"code":  http.StatusInternalServerError,
+		})
+		return
+	}
+	defer os.Remove(tmpFile.Name())
+	defer tmpFile.Close()
+
+	// Create archive
+	if format == "tar.gz" {
+		if err := s.createTarGz(safePath, tmpFile); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{
+				"error": fmt.Sprintf("Failed to create tar.gz: %v", err),
+				"code":  http.StatusInternalServerError,
+			})
+			return
+		}
+	} else {
+		if err := s.createZip(safePath, tmpFile); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{
+				"error": fmt.Sprintf("Failed to create zip: %v", err),
+				"code":  http.StatusInternalServerError,
+			})
+			return
+		}
+	}
+
+	// Get archive size
+	tmpFile.Sync()
+	archiveStat, err := tmpFile.Stat()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": fmt.Sprintf("Failed to get archive info: %v", err),
+			"code":  http.StatusInternalServerError,
+		})
+		return
+	}
+
+	// Prepare filename for download
+	dirName := filepath.Base(safePath)
+	filename := fmt.Sprintf("%s.%s", dirName, format)
+
+	// Set response headers
+	c.Header("Content-Description", "File Transfer")
+	c.Header("Content-Transfer-Encoding", "binary")
+	c.Header("Content-Disposition", encodeContentDisposition(filename))
+
+	if format == "tar.gz" {
+		c.Header("Content-Type", "application/gzip")
+	} else {
+		c.Header("Content-Type", "application/zip")
+	}
+
+	// Send file
+	c.File(tmpFile.Name())
+
+	klog.Infof("[DownloadDirectoryHandler] Downloaded directory '%s' as %s, size: %d bytes, completed in %.3f seconds",
+		decodedPath, format, archiveStat.Size(), time.Since(requestStart).Seconds())
+}
+
 // sanitizePath ensures path is within allowed scope, preventing directory traversal attacks
 func (s *Server) sanitizePath(p string) (string, error) {
 	if s.workspaceDir == "" {
@@ -507,4 +765,110 @@ func (s *Server) sanitizePath(p string) (string, error) {
 	// we have already verified that fullPathCandidate (the intended location) is safe.
 	// Return its absolute, cleaned form.
 	return fullPathCandidate, nil
+}
+
+// createTarGz creates a tar.gz archive of the given directory
+func (s *Server) createTarGz(srcDir string, dst *os.File) error {
+	gzWriter := gzip.NewWriter(dst)
+	defer gzWriter.Close()
+
+	tarWriter := tar.NewWriter(gzWriter)
+	defer tarWriter.Close()
+
+	// Get the base name for relative path calculation
+	baseDir := filepath.Dir(srcDir)
+
+	// Walk the directory tree
+	return filepath.Walk(srcDir, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+
+		// Create tar header
+		header, err := tar.FileInfoHeader(info, "")
+		if err != nil {
+			return fmt.Errorf("failed to create tar header for '%s': %w", path, err)
+		}
+
+		// Set relative path in archive
+		relPath, err := filepath.Rel(baseDir, path)
+		if err != nil {
+			return fmt.Errorf("failed to get relative path for '%s': %w", path, err)
+		}
+		header.Name = filepath.ToSlash(relPath)
+
+		// Write header
+		if err := tarWriter.WriteHeader(header); err != nil {
+			return fmt.Errorf("failed to write tar header for '%s': %w", path, err)
+		}
+
+		// Write file content (skip directories)
+		if !info.IsDir() {
+			file, err := os.Open(path)
+			if err != nil {
+				return fmt.Errorf("failed to open file '%s': %w", path, err)
+			}
+			defer file.Close()
+
+			if _, err := io.Copy(tarWriter, file); err != nil {
+				return fmt.Errorf("failed to write file content for '%s': %w", path, err)
+			}
+		}
+
+		return nil
+	})
+}
+
+// createZip creates a zip archive of the given directory
+func (s *Server) createZip(srcDir string, dst *os.File) error {
+	zipWriter := zip.NewWriter(dst)
+	defer zipWriter.Close()
+
+	// Get the base name for relative path calculation
+	baseDir := filepath.Dir(srcDir)
+
+	// Walk the directory tree
+	return filepath.Walk(srcDir, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+
+		// Skip directories (zip will create them automatically)
+		if info.IsDir() {
+			return nil
+		}
+
+		// Get relative path
+		relPath, err := filepath.Rel(baseDir, path)
+		if err != nil {
+			return fmt.Errorf("failed to get relative path for '%s': %w", path, err)
+		}
+
+		// Create zip file header
+		header, err := zip.FileInfoHeader(info)
+		if err != nil {
+			return fmt.Errorf("failed to create zip header for '%s': %w", path, err)
+		}
+		header.Name = filepath.ToSlash(relPath)
+		header.Method = zip.Deflate
+
+		// Create file writer
+		writer, err := zipWriter.CreateHeader(header)
+		if err != nil {
+			return fmt.Errorf("failed to create zip writer for '%s': %w", path, err)
+		}
+
+		// Write file content
+		file, err := os.Open(path)
+		if err != nil {
+			return fmt.Errorf("failed to open file '%s': %w", path, err)
+		}
+		defer file.Close()
+
+		if _, err := io.Copy(writer, file); err != nil {
+			return fmt.Errorf("failed to write file content for '%s': %w", path, err)
+		}
+
+		return nil
+	})
 }

@@ -582,3 +582,199 @@ func TestPicoD_StaticKeyMode(t *testing.T) {
 		assert.Equal(t, "static_mode\n", execResp.Stdout)
 	})
 }
+
+// TestDirectoryUploadDownload tests directory upload and download APIs
+func TestDirectoryUploadDownload(t *testing.T) {
+	// Clean up any environment variables from other tests
+	os.Unsetenv("PICOD_PUBLIC_KEY")
+	os.Unsetenv("PICOD_AUTH_MODE")
+
+	// Setup
+	privateKey, publicKeyStr := generateRSAKeys(t)
+	tmpDir, err := os.MkdirTemp("", "picod_dir_test")
+	require.NoError(t, err)
+	defer os.RemoveAll(tmpDir)
+
+	originalWd, err := os.Getwd()
+	require.NoError(t, err)
+	err = os.Chdir(tmpDir)
+	require.NoError(t, err)
+	defer func() { require.NoError(t, os.Chdir(originalWd)) }()
+
+	config := Config{
+		Port:         0,
+		BootstrapKey: []byte(publicKeyStr),
+		Workspace:    tmpDir,
+		AuthMode:     "", // Use dynamic mode
+	}
+
+	server := NewServer(config)
+	ts := httptest.NewServer(server.engine)
+	defer ts.Close()
+
+	client := ts.Client()
+
+	// Initialize server
+	sessionPriv, sessionPubStr := generateRSAKeys(t)
+	sessionPubB64 := base64.RawStdEncoding.EncodeToString([]byte(sessionPubStr))
+	initClaims := jwt.MapClaims{
+		"session_public_key": sessionPubB64,
+		"iat":                time.Now().Unix(),
+		"exp":                time.Now().Add(time.Hour).Unix(),
+	}
+	initToken := createToken(t, privateKey, initClaims)
+
+	initReq, _ := http.NewRequest("POST", ts.URL+"/init", nil)
+	initReq.Header.Set("Authorization", "Bearer "+initToken)
+	resp, err := client.Do(initReq)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+
+	// Helper to create authenticated token
+	createAuthToken := func(bodyBytes []byte) string {
+		hash := sha256.Sum256(bodyBytes)
+		claims := jwt.MapClaims{
+			"body_sha256": fmt.Sprintf("%x", hash),
+			"iat":         time.Now().Unix(),
+			"exp":         time.Now().Add(time.Hour).Unix(),
+		}
+		return createToken(t, sessionPriv, claims)
+	}
+
+	t.Run("Upload Directory", func(t *testing.T) {
+		// Prepare directory upload request
+		uploadReq := UploadDirectoryRequest{
+			BasePath: "test_project",
+			Files: []FileItem{
+				{
+					Path:    "main.py",
+					Content: base64.StdEncoding.EncodeToString([]byte("print('hello')")),
+					Mode:    "755",
+				},
+				{
+					Path:    "src/utils.py",
+					Content: base64.StdEncoding.EncodeToString([]byte("def helper(): pass")),
+					Mode:    "644",
+				},
+				{
+					Path:    "README.md",
+					Content: base64.StdEncoding.EncodeToString([]byte("# Test Project")),
+					Mode:    "644",
+				},
+			},
+		}
+
+		bodyBytes, err := json.Marshal(uploadReq)
+		require.NoError(t, err)
+		token := createAuthToken(bodyBytes)
+
+		req, _ := http.NewRequest("POST", ts.URL+"/api/directories", bytes.NewBuffer(bodyBytes))
+		req.Header.Set("Authorization", "Bearer "+token)
+		req.Header.Set("Content-Type", "application/json")
+
+		resp, err := client.Do(req)
+		require.NoError(t, err)
+		assert.Equal(t, http.StatusOK, resp.StatusCode)
+
+		var uploadResp UploadDirectoryResponse
+		err = json.NewDecoder(resp.Body).Decode(&uploadResp)
+		require.NoError(t, err)
+		assert.Equal(t, 3, uploadResp.TotalFiles)
+		assert.Len(t, uploadResp.UploadedFiles, 3)
+
+		// Verify files were created
+		assert.FileExists(t, filepath.Join(tmpDir, "test_project/main.py"))
+		assert.FileExists(t, filepath.Join(tmpDir, "test_project/src/utils.py"))
+		assert.FileExists(t, filepath.Join(tmpDir, "test_project/README.md"))
+	})
+
+	t.Run("Download Directory as tar.gz", func(t *testing.T) {
+		// Create auth token for GET request (empty body)
+		hash := sha256.Sum256([]byte{})
+		claims := jwt.MapClaims{
+			"body_sha256": fmt.Sprintf("%x", hash),
+			"iat":         time.Now().Unix(),
+			"exp":         time.Now().Add(time.Hour).Unix(),
+		}
+		token := createToken(t, sessionPriv, claims)
+
+		req, _ := http.NewRequest("GET", ts.URL+"/api/directories/test_project?format=tar.gz", nil)
+		req.Header.Set("Authorization", "Bearer "+token)
+
+		resp, err := client.Do(req)
+		require.NoError(t, err)
+		assert.Equal(t, http.StatusOK, resp.StatusCode)
+		assert.Equal(t, "application/gzip", resp.Header.Get("Content-Type"))
+		assert.Contains(t, resp.Header.Get("Content-Disposition"), "test_project.tar.gz")
+
+		// Read and save response
+		content, err := io.ReadAll(resp.Body)
+		require.NoError(t, err)
+		assert.Greater(t, len(content), 0)
+	})
+
+	t.Run("Download Directory as zip", func(t *testing.T) {
+		hash := sha256.Sum256([]byte{})
+		claims := jwt.MapClaims{
+			"body_sha256": fmt.Sprintf("%x", hash),
+			"iat":         time.Now().Unix(),
+			"exp":         time.Now().Add(time.Hour).Unix(),
+		}
+		token := createToken(t, sessionPriv, claims)
+
+		req, _ := http.NewRequest("GET", ts.URL+"/api/directories/test_project?format=zip", nil)
+		req.Header.Set("Authorization", "Bearer "+token)
+
+		resp, err := client.Do(req)
+		require.NoError(t, err)
+		assert.Equal(t, http.StatusOK, resp.StatusCode)
+		assert.Equal(t, "application/zip", resp.Header.Get("Content-Type"))
+		assert.Contains(t, resp.Header.Get("Content-Disposition"), "test_project.zip")
+
+		content, err := io.ReadAll(resp.Body)
+		require.NoError(t, err)
+		assert.Greater(t, len(content), 0)
+	})
+
+	t.Run("Download Non-existent Directory", func(t *testing.T) {
+		hash := sha256.Sum256([]byte{})
+		claims := jwt.MapClaims{
+			"body_sha256": fmt.Sprintf("%x", hash),
+			"iat":         time.Now().Unix(),
+			"exp":         time.Now().Add(time.Hour).Unix(),
+		}
+		token := createToken(t, sessionPriv, claims)
+
+		req, _ := http.NewRequest("GET", ts.URL+"/api/directories/nonexistent", nil)
+		req.Header.Set("Authorization", "Bearer "+token)
+
+		resp, err := client.Do(req)
+		require.NoError(t, err)
+		assert.Equal(t, http.StatusNotFound, resp.StatusCode)
+	})
+
+	t.Run("Upload Directory with Invalid Base64", func(t *testing.T) {
+		uploadReq := UploadDirectoryRequest{
+			BasePath: "bad_project",
+			Files: []FileItem{
+				{
+					Path:    "bad.txt",
+					Content: "not-valid-base64!!!",
+					Mode:    "644",
+				},
+			},
+		}
+
+		bodyBytes, err := json.Marshal(uploadReq)
+		require.NoError(t, err)
+		token := createAuthToken(bodyBytes)
+
+		req, _ := http.NewRequest("POST", ts.URL+"/api/directories", bytes.NewBuffer(bodyBytes))
+		req.Header.Set("Authorization", "Bearer "+token)
+		req.Header.Set("Content-Type", "application/json")
+
+		resp, err := client.Do(req)
+		require.NoError(t, err)
+		assert.Equal(t, http.StatusBadRequest, resp.StatusCode)
+	})
+}

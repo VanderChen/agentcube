@@ -128,6 +128,10 @@ func NewServer(config Config) *Server {
 		api.POST("/run_python", s.RunPythonHandler)
 		api.POST("/run_python_file", s.RunPythonFileHandler)
 		api.PUT("/ttl", s.SetTTLHandler)
+
+		// Directory operations
+		api.POST("/directories", s.UploadDirectoryHandler)
+		api.GET("/directories/*path", s.DownloadDirectoryHandler)
 	}
 
 	engine.POST("/init", s.authManager.InitHandler)
