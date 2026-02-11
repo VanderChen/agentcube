@@ -35,9 +35,9 @@ cleanup() {
 
 generate_keys() {
     if [ ! -f "$BOOTSTRAP_PRIVATE_KEY" ]; then
-        echo -e "${BLUE}🔑 Generating keys...${NC}"
-        openssl genrsa -out "$BOOTSTRAP_PRIVATE_KEY" 2048 2>/dev/null
-        openssl rsa -in "$BOOTSTRAP_PRIVATE_KEY" -pubout -out "$BOOTSTRAP_PUBLIC_KEY" 2>/dev/null
+        echo -e "${BLUE}🔑 Generating EC P-256 keys...${NC}"
+        openssl ecparam -name prime256v1 -genkey -noout -out "$BOOTSTRAP_PRIVATE_KEY" 2>/dev/null
+        openssl ec -in "$BOOTSTRAP_PRIVATE_KEY" -pubout -out "$BOOTSTRAP_PUBLIC_KEY" 2>/dev/null
     fi
 }
 

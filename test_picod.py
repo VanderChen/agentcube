@@ -28,7 +28,7 @@ import random
 from datetime import datetime, timezone
 from typing import Dict, Any, Optional
 from cryptography.hazmat.primitives import serialization
-from cryptography.hazmat.primitives.asymmetric import rsa
+from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.hazmat.backends import default_backend
 import jwt
 
@@ -97,11 +97,10 @@ class PicodClient:
             self._load_bootstrap_keys(bootstrap_key_path)
     
     def _generate_session_keys(self):
-        """Generate RSA key pair for session"""
-        # print("🔑 Generating session RSA key pair...")
-        self.session_private_key = rsa.generate_private_key(
-            public_exponent=65537,
-            key_size=2048,
+        """Generate EC key pair for session"""
+        # print("🔑 Generating session EC key pair...")
+        self.session_private_key = ec.generate_private_key(
+            ec.SECP256R1(),
             backend=default_backend()
         )
         self.session_public_key = self.session_private_key.public_key()
@@ -128,7 +127,7 @@ class PicodClient:
             'iat': now,
             'exp': now.timestamp() + 300
         })
-        token = jwt.encode(claims, private_key, algorithm='PS256')
+        token = jwt.encode(claims, private_key, algorithm='ES256')
         return token
     
     def _build_canonical_request_hash(self, method: str, path: str, body: bytes, 
@@ -473,9 +472,9 @@ def main():
         print(f"⚠️ Key not found: {args.key}, generating temporary...")
         # ... logic omitted for brevity, assuming run_picod_test.sh handles this normally ...
         # But for robustness we should generate:
-        priv = rsa.generate_private_key(65537, 2048, default_backend())
+        priv = ec.generate_private_key(ec.SECP256R1(), default_backend())
         with open(args.key, 'wb') as f:
-            f.write(priv.private_key_bytes(serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8, serialization.NoEncryption()))
+            f.write(priv.private_bytes(serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8, serialization.NoEncryption()))
         # Warning: Public key on server side must match!
         # The shell script ensures this. If running standalone python, this might fail auth if server has different key.
         

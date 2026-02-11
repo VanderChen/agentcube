@@ -6,7 +6,7 @@ import jwt
 import base64
 import logging
 from cryptography.hazmat.primitives import serialization
-from cryptography.hazmat.primitives.asymmetric import rsa
+from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.hazmat.backends import default_backend
 
 from agentcube.clients.data_plane import DataPlaneClient
@@ -43,25 +43,24 @@ class DirectDataPlaneClient(DataPlaneClient):
 # --- Helper Functions ---
 
 def generate_key_pair():
-    """Generate RSA 2048 key pair."""
-    private_key = rsa.generate_private_key(
-        public_exponent=65537,
-        key_size=2048,
+    """Generate EC P-256 key pair."""
+    private_key = ec.generate_private_key(
+        ec.SECP256R1(),
         backend=default_backend()
     )
-    
+
     pub = private_key.public_key()
     pub_pem = pub.public_bytes(
         encoding=serialization.Encoding.PEM,
         format=serialization.PublicFormat.SubjectPublicKeyInfo
     )
-    
+
     priv_pem = private_key.private_bytes(
         encoding=serialization.Encoding.PEM,
         format=serialization.PrivateFormat.PKCS8,
         encryption_algorithm=serialization.NoEncryption()
     )
-    
+
     return private_key, priv_pem, pub_pem
 
 def start_picod_container():
@@ -129,7 +128,7 @@ def perform_init_handshake(bootstrap_priv_key, session_pub_pem):
     token = jwt.encode(
         payload=claims,
         key=bootstrap_priv_key,
-        algorithm="PS256"
+        algorithm="ES256"
     )
     
     url = f"http://localhost:{HOST_PORT}/init"

@@ -23,7 +23,7 @@ import requests
 import jwt
 from urllib.parse import urlparse, urlencode
 from cryptography.hazmat.primitives import serialization
-from cryptography.hazmat.primitives.asymmetric import rsa
+from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.hazmat.backends import default_backend
 
 # Configure Logging
@@ -38,25 +38,24 @@ HOST_PORT = 8081  # Different from SDK test to avoid conflict
 # --- Key Generation ---
 
 def generate_key_pair():
-    """Generate RSA 2048 key pair."""
-    private_key = rsa.generate_private_key(
-        public_exponent=65537,
-        key_size=2048,
+    """Generate EC P-256 key pair."""
+    private_key = ec.generate_private_key(
+        ec.SECP256R1(),
         backend=default_backend()
     )
-    
+
     pub = private_key.public_key()
     pub_pem = pub.public_bytes(
         encoding=serialization.Encoding.PEM,
         format=serialization.PublicFormat.SubjectPublicKeyInfo
     )
-    
+
     priv_pem = private_key.private_bytes(
         encoding=serialization.Encoding.PEM,
         format=serialization.PrivateFormat.PKCS8,
         encryption_algorithm=serialization.NoEncryption()
     )
-    
+
     return private_key, priv_pem, pub_pem
 
 
@@ -126,7 +125,7 @@ def create_jwt(private_key, canonical_request_sha256: str) -> str:
         "exp": now + 300,
         "canonical_request_sha256": canonical_request_sha256
     }
-    return jwt.encode(claims, private_key, algorithm="PS256")
+    return jwt.encode(claims, private_key, algorithm="ES256")
 
 
 # --- Request Helper ---
@@ -291,7 +290,7 @@ def print_container_logs():
 def run_tests():
     """Run all E2E tests."""
     # Generate keys
-    logger.info("Generating RSA key pair...")
+    logger.info("Generating EC key pair...")
     private_key, priv_pem, pub_pem = generate_key_pair()
     public_key_b64 = base64.b64encode(pub_pem).decode('utf-8')
     
