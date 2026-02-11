@@ -2,7 +2,7 @@ package picod
 
 import (
 	"bytes"
-	"crypto/rsa"
+	"crypto/ecdsa"
 	"crypto/sha256"
 	"crypto/x509"
 	"encoding/base64"
@@ -28,10 +28,10 @@ const (
 	MaxBodySize = 32 << 20 // 32 MB limit to prevent memory exhaustion
 )
 
-// AuthManager manages RSA public key authentication
+// AuthManager manages EC public key authentication
 type AuthManager struct {
-	publicKey    *rsa.PublicKey
-	bootstrapKey *rsa.PublicKey // Key injected at startup for init authentication
+	publicKey    *ecdsa.PublicKey
+	bootstrapKey *ecdsa.PublicKey // Key injected at startup for init authentication
 	mutex        sync.RWMutex
 	keyFile      string
 	initialized  bool
@@ -82,35 +82,19 @@ func (am *AuthManager) LoadStaticPublicKey() error {
 	am.mutex.Lock()
 	defer am.mutex.Unlock()
 
-	keyB64 := os.Getenv("PICOD_PUBLIC_KEY")
-	if keyB64 == "" {
+	keyEncoded := os.Getenv("PICOD_PUBLIC_KEY")
+	if keyEncoded == "" {
 		return fmt.Errorf("PICOD_PUBLIC_KEY environment variable is not set")
 	}
 
-	// Decode base64
-	data, err := base64.StdEncoding.DecodeString(keyB64)
+	ecPub, err := parseECPublicKeyFromEncodedString(keyEncoded)
 	if err != nil {
-		return fmt.Errorf("failed to decode base64 PICOD_PUBLIC_KEY: %v", err)
+		return fmt.Errorf("failed to parse PICOD_PUBLIC_KEY: %v", err)
 	}
 
-	block, _ := pem.Decode(data)
-	if block == nil {
-		return fmt.Errorf("failed to decode PEM block from PICOD_PUBLIC_KEY")
-	}
-
-	pub, err := x509.ParsePKIXPublicKey(block.Bytes)
-	if err != nil {
-		return fmt.Errorf("failed to parse static public key: %v", err)
-	}
-
-	rsaPub, ok := pub.(*rsa.PublicKey)
-	if !ok {
-		return fmt.Errorf("static key is not an RSA public key")
-	}
-
-	am.publicKey = rsaPub
+	am.publicKey = ecPub
 	am.initialized = true
-	klog.Infof("Loaded static public key successfully. Modulus size: %d bits", rsaPub.N.BitLen())
+	klog.Infof("Loaded static EC public key successfully")
 	return nil
 }
 
@@ -130,12 +114,12 @@ func (am *AuthManager) LoadBootstrapKey(keyData []byte) error {
 		return fmt.Errorf("failed to parse bootstrap public key: %v", err)
 	}
 
-	rsaPub, ok := pub.(*rsa.PublicKey)
+	ecPub, ok := pub.(*ecdsa.PublicKey)
 	if !ok {
-		return fmt.Errorf("bootstrap key is not an RSA public key")
+		return fmt.Errorf("bootstrap key is not an EC public key")
 	}
 
-	am.bootstrapKey = rsaPub
+	am.bootstrapKey = ecPub
 	return nil
 }
 
@@ -163,37 +147,28 @@ func (am *AuthManager) LoadPublicKey() error {
 		return fmt.Errorf("failed to parse public key: %v", err)
 	}
 
-	rsaPub, ok := pub.(*rsa.PublicKey)
+	ecPub, ok := pub.(*ecdsa.PublicKey)
 	if !ok {
-		return fmt.Errorf("not an RSA public key")
+		return fmt.Errorf("not an EC public key")
 	}
 
-	am.publicKey = rsaPub
+	am.publicKey = ecPub
 	am.initialized = true
 	return nil
 }
 
 func (am *AuthManager) savePublicKeyLocked(publicKeyStr string) error {
-	publicKeyByte, err := base64.RawStdEncoding.DecodeString(publicKeyStr)
+	ecPub, err := parseECPublicKeyFromEncodedString(publicKeyStr)
 	if err != nil {
-		return fmt.Errorf("failed to decode base64")
+		return fmt.Errorf("failed to parse session public key: %v", err)
 	}
 
-	// Parse the public key
-	block, _ := pem.Decode(publicKeyByte)
-	if block == nil {
-		return fmt.Errorf("failed to decode PEM block")
-	}
-
-	pub, err := x509.ParsePKIXPublicKey(block.Bytes)
+	// Normalize to PEM on disk so reload path stays stable.
+	pubASN1, err := x509.MarshalPKIXPublicKey(ecPub)
 	if err != nil {
-		return fmt.Errorf("failed to parse public key: %v", err)
+		return fmt.Errorf("failed to marshal EC public key: %v", err)
 	}
-
-	rsaPub, ok := pub.(*rsa.PublicKey)
-	if !ok {
-		return fmt.Errorf("not an RSA public key")
-	}
+	publicKeyPEM := pem.EncodeToMemory(&pem.Block{Type: "PUBLIC KEY", Bytes: pubASN1})
 
 	// Check if already initialized
 	if am.initialized {
@@ -201,7 +176,7 @@ func (am *AuthManager) savePublicKeyLocked(publicKeyStr string) error {
 	}
 
 	// Save to file with read-only permissions
-	if err := os.WriteFile(am.keyFile, publicKeyByte, 0400); err != nil {
+	if err := os.WriteFile(am.keyFile, publicKeyPEM, 0400); err != nil {
 		return fmt.Errorf("failed to save public key file: %v", err)
 	}
 
@@ -217,9 +192,46 @@ func (am *AuthManager) savePublicKeyLocked(publicKeyStr string) error {
 		klog.Infof("Note: chattr command is Linux-specific. Current OS: %s. File permissions set to read-only.", runtime.GOOS)
 	}
 
-	am.publicKey = rsaPub
+	am.publicKey = ecPub
 	am.initialized = true
 	return nil
+}
+
+func decodeBase64Auto(s string) ([]byte, error) {
+	if b, err := base64.StdEncoding.DecodeString(s); err == nil {
+		return b, nil
+	}
+	if b, err := base64.RawStdEncoding.DecodeString(s); err == nil {
+		return b, nil
+	}
+	return nil, fmt.Errorf("invalid base64 input")
+}
+
+// parseECPublicKeyFromEncodedString accepts:
+// 1) Base64(PEM bytes)
+// 2) Base64(DER PKIX bytes)
+func parseECPublicKeyFromEncodedString(keyEncoded string) (*ecdsa.PublicKey, error) {
+	keyBytes, err := decodeBase64Auto(keyEncoded)
+	if err != nil {
+		return nil, err
+	}
+
+	derBytes := keyBytes
+	if block, _ := pem.Decode(keyBytes); block != nil {
+		derBytes = block.Bytes
+	}
+
+	pub, err := x509.ParsePKIXPublicKey(derBytes)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse public key: %v", err)
+	}
+
+	ecPub, ok := pub.(*ecdsa.PublicKey)
+	if !ok {
+		return nil, fmt.Errorf("not an EC public key")
+	}
+
+	return ecPub, nil
 }
 
 // IsInitialized checks if server is initialized
@@ -279,8 +291,8 @@ func (am *AuthManager) InitHandler(c *gin.Context) {
 
 	// Parse and validate JWT
 	token, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
-		if _, ok := token.Method.(*jwt.SigningMethodRSAPSS); !ok {
-			return nil, fmt.Errorf("unexpected signing method: %v, expected PS256", token.Header["alg"])
+		if method, ok := token.Method.(*jwt.SigningMethodECDSA); !ok || method.Alg() != jwt.SigningMethodES256.Alg() {
+			return nil, fmt.Errorf("unexpected signing method: %v, expected ES256", token.Header["alg"])
 		}
 		return am.bootstrapKey, nil
 	}, jwt.WithExpirationRequired(), jwt.WithIssuedAt(), jwt.WithLeeway(time.Minute))
@@ -370,8 +382,8 @@ func (am *AuthManager) AuthMiddleware() gin.HandlerFunc {
 
 		// Parse and validate JWT using Session Public Key
 		token, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
-			if _, ok := token.Method.(*jwt.SigningMethodRSAPSS); !ok {
-				return nil, fmt.Errorf("unexpected signing method: %v, expected PS256", token.Header["alg"])
+			if method, ok := token.Method.(*jwt.SigningMethodECDSA); !ok || method.Alg() != jwt.SigningMethodES256.Alg() {
+				return nil, fmt.Errorf("unexpected signing method: %v, expected ES256", token.Header["alg"])
 			}
 			// Use the session public key for verification
 			// Lock is handled by IsInitialized check above, but safe to read pointer here
