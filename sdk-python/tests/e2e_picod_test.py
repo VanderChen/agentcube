@@ -279,6 +279,79 @@ def main():
                 if "WORKLOAD_MANAGER_URL" in os.environ:
                     del os.environ["WORKLOAD_MANAGER_URL"]
 
+        logger.info(">>> TEST: Multi-level Path File (a/b/c.txt)")
+        # Create directory structure
+        client.execute_command("mkdir -p a/b")
+
+        # Create file in nested path
+        nested_content = "test content in nested path"
+        client.write_file(nested_content, "a/b/c.txt")
+
+        # Verify with cat
+        output = client.execute_command("cat a/b/c.txt")
+        assert output.strip() == nested_content, f"Content mismatch: {output}"
+
+        # Download and verify
+        client.download_file("a/b/c.txt", "downloaded_nested.txt")
+        with open("downloaded_nested.txt", "r") as f:
+            content = f.read()
+        assert content == nested_content, f"Downloaded content mismatch: {content}"
+        os.remove("downloaded_nested.txt")
+
+        logger.info(">>> TEST: 32MB File Upload/Download")
+        # Generate 32MB file (at the limit)
+        large_content = os.urandom(32 * 1024 * 1024)
+        large_file_local = "local_32mb.bin"
+        with open(large_file_local, "wb") as f:
+            f.write(large_content)
+
+        try:
+            # Upload via multipart
+            logger.info("Uploading 32MB file...")
+            client.upload_file(large_file_local, "remote_32mb.bin")
+
+            # Verify file size via list_files
+            files = client.list_files(".")
+            large_file_info = next((f for f in files if f['name'] == 'remote_32mb.bin'), None)
+            assert large_file_info is not None, "32MB file not found in listing"
+            expected_size = 32 * 1024 * 1024
+            assert large_file_info['size'] == expected_size, f"Size mismatch: {large_file_info['size']} vs {expected_size}"
+
+            # Download and verify content (might be slow)
+            logger.info("Downloading 32MB file...")
+            client.download_file("remote_32mb.bin", "downloaded_32mb.bin")
+            with open("downloaded_32mb.bin", "rb") as f:
+                downloaded_content = f.read()
+            assert downloaded_content == large_content, f"Content mismatch (size: {len(downloaded_content)} vs {len(large_content)})"
+
+            logger.info(f"✓ 32MB file test passed (size: {len(large_content)} bytes)")
+        finally:
+            if os.path.exists(large_file_local):
+                os.remove(large_file_local)
+            if os.path.exists("downloaded_32mb.bin"):
+                os.remove("downloaded_32mb.bin")
+
+        logger.info(">>> TEST: Chinese Filename (测试文件.txt)")
+        # Upload file with Chinese name
+        chinese_content = "这是一个中文测试文件。\nThis is a Chinese test file."
+        client.write_file(chinese_content, "测试文件.txt")
+
+        # Verify with cat
+        output = client.execute_command("cat 测试文件.txt")
+        assert "中文测试文件" in output, f"Chinese content not found: {output}"
+
+        # List files to verify it exists
+        files = client.list_files(".")
+        file_names = [f['name'] for f in files]
+        assert "测试文件.txt" in file_names, f"Chinese file not found: {file_names}"
+
+        # Download and verify
+        client.download_file("测试文件.txt", "downloaded_chinese.txt")
+        with open("downloaded_chinese.txt", "r", encoding="utf-8") as f:
+            content = f.read()
+        assert content == chinese_content, f"Content mismatch: {content}"
+        os.remove("downloaded_chinese.txt")
+
         logger.info(">>> ALL TESTS PASSED SUCCESSFULLY! <<<")
         
     except Exception as e:

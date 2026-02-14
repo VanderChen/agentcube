@@ -130,12 +130,23 @@ class PicodClient:
         token = jwt.encode(claims, private_key, algorithm='ES256')
         return token
     
-    def _build_canonical_request_hash(self, method: str, path: str, body: bytes, 
+    def _build_canonical_request_hash(self, method: str, url: str, body: bytes,
                                      content_type: Optional[str] = None) -> str:
+        from urllib.parse import urlparse, parse_qs, urlencode
         method = method.upper()
-        uri = path if path else "/"
+
+        # Parse URL to extract path and query string
+        parsed = urlparse(url)
+        uri = parsed.path if parsed.path else "/"
+
+        # Build canonical query string (sorted)
         query_string = ""
-        
+        if parsed.query:
+            params = parse_qs(parsed.query, keep_blank_values=True)
+            # Sort and format query parameters
+            sorted_params = sorted([(k, v[0] if v else '') for k, vals in params.items() for v in (vals if vals else [''])])
+            query_string = '&'.join(f"{k}={v}" for k, v in sorted_params)
+
         canonical_headers = ""
         signed_headers = ""
         if content_type:
@@ -143,9 +154,9 @@ class PicodClient:
             signed_headers = "content-type"
         else:
             canonical_headers = "\n"
-        
+
         body_hash = hashlib.sha256(body).hexdigest()
-        
+
         canonical_request = "\n".join([
             method,
             uri,
@@ -154,7 +165,7 @@ class PicodClient:
             signed_headers,
             body_hash
         ])
-        
+
         return hashlib.sha256(canonical_request.encode()).hexdigest()
     
     def check_initialized(self) -> bool:
@@ -190,34 +201,41 @@ class PicodClient:
             if self.collector:
                 self.collector.add(path, method, duration, status_code, error_msg)
 
-    def _make_authenticated_request(self, method: str, path: str, 
+    def _make_authenticated_request(self, method: str, path: str,
                                    json_data: Optional[Dict] = None,
                                    params: Optional[Dict] = None) -> requests.Response:
         if not self.initialized:
             raise Exception("PicoD not initialized")
-        
+
         body = b''
         content_type = None
         if json_data:
             body = json.dumps(json_data).encode()
             content_type = 'application/json'
-        
+
+        # Build full URL with query parameters for signing
+        url = f"{self.base_url}{path}"
+        if params:
+            from urllib.parse import urlencode
+            query_string = urlencode(sorted(params.items()))
+            full_url_for_signing = f"{url}?{query_string}"
+        else:
+            full_url_for_signing = url
+
         canonical_hash = self._build_canonical_request_hash(
-            method, path, body, content_type
+            method, full_url_for_signing, body, content_type
         )
-        
+
         token = self._create_jwt(self.session_private_key, {
             'canonical_request_sha256': canonical_hash
         })
-        
+
         headers = {
             'Authorization': f'Bearer {token}'
         }
         if content_type:
             headers['Content-Type'] = content_type
-        
-        url = f"{self.base_url}{path}"
-        
+
         return self._measure_request(
             method,
             url,
@@ -307,6 +325,11 @@ class PicodClient:
         return response.json()
     
     def upload_file(self, path: str, content: bytes, mode: str = "644") -> Dict[str, Any]:
+        # For large files (>10MB), use multipart upload
+        if len(content) > 10 * 1024 * 1024:
+            return self.upload_file_multipart(path, content, mode)
+
+        # For small files, use JSON base64 upload
         content_b64 = base64.b64encode(content).decode()
         response = self._make_authenticated_request(
             'POST',
@@ -318,6 +341,69 @@ class PicodClient:
             }
         )
         return response.json()
+
+    def upload_file_multipart(self, path: str, content: bytes, mode: str = "644") -> Dict[str, Any]:
+        """Upload file using multipart/form-data (for large files)"""
+        if not self.initialized:
+            raise Exception("PicoD not initialized")
+
+        # Manually build multipart body with correct format
+        import uuid
+        boundary = uuid.uuid4().hex
+
+        parts = []
+
+        # Add 'path' field
+        parts.append(f'--{boundary}\r\n'.encode())
+        parts.append(b'Content-Disposition: form-data; name="path"\r\n\r\n')
+        parts.append(path.encode() + b'\r\n')
+
+        # Add 'mode' field
+        parts.append(f'--{boundary}\r\n'.encode())
+        parts.append(b'Content-Disposition: form-data; name="mode"\r\n\r\n')
+        parts.append(mode.encode() + b'\r\n')
+
+        # Add 'file' field
+        filename = os.path.basename(path)
+        parts.append(f'--{boundary}\r\n'.encode())
+        parts.append(f'Content-Disposition: form-data; name="file"; filename="{filename}"\r\n'.encode())
+        parts.append(b'Content-Type: application/octet-stream\r\n\r\n')
+        parts.append(content)
+        parts.append(b'\r\n')
+
+        # Add closing boundary
+        parts.append(f'--{boundary}--\r\n'.encode())
+
+        body = b''.join(parts)
+        content_type = f'multipart/form-data; boundary={boundary}'
+
+        # Sign with actual body and content-type
+        canonical_hash = self._build_canonical_request_hash(
+            'POST', '/api/files', body, content_type
+        )
+
+        token = self._create_jwt(self.session_private_key, {
+            'canonical_request_sha256': canonical_hash
+        })
+
+        headers = {
+            'Authorization': f'Bearer {token}',
+            'Content-Type': content_type
+        }
+
+        url = f"{self.base_url}/api/files"
+
+        start_time = time.time()
+        import requests
+        resp = requests.post(url, data=body, headers=headers, timeout=60)
+        duration = time.time() - start_time
+
+        if self.collector:
+            self.collector.add('/api/files', 'POST', duration, resp.status_code,
+                             "" if resp.ok else resp.text)
+
+        resp.raise_for_status()
+        return resp.json()
     
     def list_files(self, path: str = ".") -> Dict[str, Any]:
         response = self._make_authenticated_request(
@@ -402,7 +488,72 @@ def run_functional_tests(client: PicodClient):
     except Exception as e:
         print(f"❌ {e}")
         return False
-        
+
+    # 5. Multi-level Path File Test
+    print("  Testing Multi-level Path (a/b/c.txt)...", end=" ")
+    try:
+        # Create directory structure using execute command
+        client.execute_command(['mkdir', '-p', 'a/b'])
+
+        # Upload file to a/b/c.txt
+        test_content = b"test content in nested path"
+        client.upload_file('a/b/c.txt', test_content)
+
+        # Download and verify
+        downloaded = client.download_file('a/b/c.txt')
+        if downloaded == test_content:
+            print("✅")
+        else:
+            print(f"❌ Content mismatch")
+            return False
+    except Exception as e:
+        print(f"❌ {e}")
+        return False
+
+    # 6. 32MB File Test (actually 31.5MB to account for multipart overhead)
+    print("  Testing 31.5MB File Upload/Download...", end=" ")
+    try:
+        # Generate 31.5MB file (leaves room for multipart overhead under 32MB limit)
+        large_content = os.urandom(int(31.5 * 1024 * 1024))
+        client.upload_file('large_file_31_5mb.bin', large_content)
+
+        # Download and verify
+        downloaded = client.download_file('large_file_31_5mb.bin')
+        if downloaded == large_content:
+            print("✅")
+        else:
+            print(f"❌ Content mismatch (size: {len(downloaded)} vs {len(large_content)})")
+            return False
+    except Exception as e:
+        print(f"❌ {e}")
+        return False
+
+    # 7. Chinese Filename Test
+    print("  Testing Chinese Filename (测试文件.txt)...", end=" ")
+    try:
+        # Upload file with Chinese name
+        chinese_content = "这是一个中文测试文件。\nThis is a Chinese test file.".encode('utf-8')
+        client.upload_file('测试文件.txt', chinese_content)
+
+        # List files to verify it exists
+        response = client.list_files('.')
+        files = response.get('files', [])
+        file_names = [f['name'] for f in files]
+        if '测试文件.txt' not in file_names:
+            print(f"❌ Chinese file not found in list")
+            return False
+
+        # Download and verify
+        downloaded = client.download_file('测试文件.txt')
+        if downloaded == chinese_content:
+            print("✅")
+        else:
+            print(f"❌ Content mismatch")
+            return False
+    except Exception as e:
+        print(f"❌ {e}")
+        return False
+
     return True
 
 def run_concurrent_tests(client: PicodClient, concurrency: int, task_name: str, task_func, duration_sec: int = 10):

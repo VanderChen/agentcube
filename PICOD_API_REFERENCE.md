@@ -438,6 +438,87 @@ curl -X POST http://localhost:8080/api/files \
   -F "file=@test.jpg"
 ```
 
+#### 方式 3: 多级路径文件上传（完整示例）
+
+**描述**: 演示创建多级目录并上传文件到嵌套路径。
+
+**步骤**:
+1. 创建多级目录结构
+2. 上传文件到嵌套路径
+3. 验证文件是否上传成功
+
+**curl 示例**:
+```bash
+export JWT_TOKEN="eyJhbGc..."
+
+# Step 1: 创建多级目录 a/b/c
+curl -X POST http://localhost:8080/api/execute \
+  -H "Authorization: Bearer ${JWT_TOKEN}" \
+  -H "Content-Type: application/json" \
+  -d '{"command": ["mkdir", "-p", "a/b/c"]}'
+
+# Step 2: 上传文件到 a/b/c/test.txt (JSON 方式)
+curl -X POST http://localhost:8080/api/files \
+  -H "Authorization: Bearer ${JWT_TOKEN}" \
+  -H "Content-Type: application/json" \
+  -d "{
+    \"path\": \"a/b/c/test.txt\",
+    \"content\": \"$(echo 'Content in nested path a/b/c' | base64)\",
+    \"mode\": \"644\"
+  }"
+
+# Step 3: 验证文件 - 列出目录内容
+curl -X GET "http://localhost:8080/api/files?path=a/b/c" \
+  -H "Authorization: Bearer ${JWT_TOKEN}"
+
+# Step 4: 读取文件内容验证
+curl -X POST http://localhost:8080/api/execute \
+  -H "Authorization: Bearer ${JWT_TOKEN}" \
+  -H "Content-Type: application/json" \
+  -d '{"command": ["cat", "a/b/c/test.txt"]}'
+```
+
+#### 方式 4: 大文件上传（31MB+ 文件，推荐使用 Multipart）
+
+**描述**: 上传大文件（接近 32MB 限制）时推荐使用 multipart 方式，JSON base64 方式会因编码膨胀导致超限。
+
+**限制说明**:
+- JSON + Base64: 约 48MB 编码后文件 → 实际支持约 24MB 原始文件
+- Multipart: 支持接近 32MB 原始文件（预留 multipart 头部开销）
+
+**curl 示例**:
+```bash
+export JWT_TOKEN="eyJhbGc..."
+
+# 生成 31MB 测试文件（为 multipart 头部预留 1MB 空间）
+dd if=/dev/urandom of=large_file_31mb.bin bs=1M count=31
+
+# 使用 multipart 上传大文件
+curl -X POST http://localhost:8080/api/files \
+  -H "Authorization: Bearer ${JWT_TOKEN}" \
+  -F "path=uploads/large_file_31mb.bin" \
+  -F "mode=644" \
+  -F "file=@large_file_31mb.bin"
+
+# 验证文件大小
+curl -X POST http://localhost:8080/api/execute \
+  -H "Authorization: Bearer ${JWT_TOKEN}" \
+  -H "Content-Type: application/json" \
+  -d '{"command": ["ls", "-lh", "uploads/large_file_31mb.bin"]}'
+
+# 验证文件完整性（使用 md5sum）
+md5sum large_file_31mb.bin  # 本地计算 MD5
+curl -X POST http://localhost:8080/api/execute \
+  -H "Authorization: Bearer ${JWT_TOKEN}" \
+  -H "Content-Type: application/json" \
+  -d '{"command": ["md5sum", "uploads/large_file_31mb.bin"]}'
+```
+
+**注意事项**:
+- 大文件上传建议设置更长的超时时间（curl 默认无超时）
+- 如果上传失败，检查 Docker 容器的内存限制
+- 对于更大的文件（>32MB），考虑分块上传或使用文件夹批量上传
+
 ---
 
 ### 5. 下载文件
@@ -494,6 +575,136 @@ curl --path-as-is -X GET "http://localhost:8080/api/files/a/b/c/test.txt" \
 # 下载并查看文本文件内容
 curl -X GET "http://localhost:8080/api/files/scripts/hello.py" \
   -H "Authorization: Bearer ${JWT_TOKEN}"
+```
+
+### 高级示例：多路径和大文件下载
+
+#### 示例 1: 下载多级嵌套路径文件（完整流程）
+
+```bash
+export JWT_TOKEN="eyJhbGc..."
+
+# 假设已经上传了 a/b/c/test.txt 文件
+# 下载多级路径文件
+curl -X GET "http://localhost:8080/api/files/a/b/c/test.txt" \
+  -H "Authorization: Bearer ${JWT_TOKEN}" \
+  -o downloaded_test.txt
+
+# 或者使用 --path-as-is 避免路径归一化问题
+curl --path-as-is -X GET "http://localhost:8080/api/files/a/b/c/test.txt" \
+  -H "Authorization: Bearer ${JWT_TOKEN}" \
+  -o downloaded_test.txt
+
+# 验证文件内容
+cat downloaded_test.txt
+```
+
+#### 示例 2: 下载大文件（31MB+）并验证完整性
+
+```bash
+export JWT_TOKEN="eyJhbGc..."
+
+# 下载大文件（31MB）
+curl -X GET "http://localhost:8080/api/files/uploads/large_file_31mb.bin" \
+  -H "Authorization: Bearer ${JWT_TOKEN}" \
+  -o downloaded_large_file.bin \
+  --max-time 300  # 设置 5 分钟超时
+
+# 验证文件大小
+ls -lh downloaded_large_file.bin
+
+# 计算并比对 MD5（需要先获取服务器端 MD5）
+# 获取服务器端 MD5
+SERVER_MD5=$(curl -X POST http://localhost:8080/api/execute \
+  -H "Authorization: Bearer ${JWT_TOKEN}" \
+  -H "Content-Type: application/json" \
+  -d '{"command": ["md5sum", "uploads/large_file_31mb.bin"]}' | jq -r '.stdout' | awk '{print $1}')
+
+# 计算本地 MD5
+LOCAL_MD5=$(md5sum downloaded_large_file.bin | awk '{print $1}')
+
+# 比对
+if [ "$SERVER_MD5" = "$LOCAL_MD5" ]; then
+  echo "✅ File integrity verified: MD5 = $LOCAL_MD5"
+else
+  echo "❌ File integrity check failed!"
+  echo "  Server MD5: $SERVER_MD5"
+  echo "  Local MD5:  $LOCAL_MD5"
+fi
+```
+
+#### 示例 3: 下载中文文件名文件（完整示例）
+
+```bash
+export JWT_TOKEN="eyJhbGc..."
+
+# 方法 1: 手动 URL 编码
+# "测试文件.txt" → "%E6%B5%8B%E8%AF%95%E6%96%87%E4%BB%B6.txt"
+curl -X GET "http://localhost:8080/api/files/%E6%B5%8B%E8%AF%95%E6%96%87%E4%BB%B6.txt" \
+  -H "Authorization: Bearer ${JWT_TOKEN}" \
+  -o 测试文件_downloaded.txt
+
+# 方法 2: 使用 Python 自动编码和下载
+python3 << 'EOF'
+import urllib.parse
+import subprocess
+import os
+
+JWT_TOKEN = os.getenv('JWT_TOKEN')
+filename = "测试文件.txt"
+encoded = urllib.parse.quote(filename, safe='')
+
+url = f"http://localhost:8080/api/files/{encoded}"
+cmd = [
+    'curl', '-X', 'GET', url,
+    '-H', f'Authorization: Bearer {JWT_TOKEN}',
+    '-o', f'{filename}_downloaded'
+]
+
+print(f"Downloading: {url}")
+subprocess.run(cmd)
+print(f"✅ Downloaded to {filename}_downloaded")
+EOF
+
+# 验证下载的中文文件内容
+cat 测试文件_downloaded.txt
+```
+
+#### 示例 4: 批量下载多个嵌套路径文件
+
+```bash
+export JWT_TOKEN="eyJhbGc..."
+
+# 定义要下载的文件列表
+FILES=(
+  "a/b/c/file1.txt"
+  "data/logs/app.log"
+  "scripts/main.py"
+  "docs/readme.md"
+)
+
+# 批量下载
+mkdir -p downloads
+for file in "${FILES[@]}"; do
+  echo "Downloading $file..."
+
+  # 创建本地目录结构
+  mkdir -p "downloads/$(dirname "$file")"
+
+  # 下载文件
+  curl --path-as-is -X GET "http://localhost:8080/api/files/$file" \
+    -H "Authorization: Bearer ${JWT_TOKEN}" \
+    -o "downloads/$file" \
+    --fail --silent --show-error
+
+  if [ $? -eq 0 ]; then
+    echo "✅ $file"
+  else
+    echo "❌ Failed to download $file"
+  fi
+done
+
+echo "All downloads completed. Files saved to downloads/"
 ```
 
 ---
@@ -1131,6 +1342,188 @@ curl -X POST "${PICOD_URL}/api/files" \
 # 下载中文文件（URL 编码）
 curl -X GET "${PICOD_URL}/api/files/%E6%B5%8B%E8%AF%95/%E4%B8%AD%E6%96%87%E6%96%87%E4%BB%B6.txt" \
   -H "Authorization: Bearer ${JWT_TOKEN}"
+```
+
+### 大文件上传下载完整测试（31MB）
+
+```bash
+#!/bin/bash
+set -e
+
+export JWT_TOKEN=$(generate_jwt)
+PICOD_URL="http://localhost:8080"
+
+echo "=== 31MB Large File Upload/Download Test ==="
+
+# Step 1: 生成 31MB 测试文件
+echo "📦 Generating 31MB test file..."
+dd if=/dev/urandom of=test_31mb.bin bs=1M count=31 2>/dev/null
+ORIGINAL_MD5=$(md5sum test_31mb.bin | awk '{print $1}')
+echo "   Original MD5: ${ORIGINAL_MD5}"
+
+# Step 2: 上传大文件（使用 multipart）
+echo "⬆️  Uploading 31MB file via multipart..."
+UPLOAD_START=$(date +%s%3N)
+curl -X POST "${PICOD_URL}/api/files" \
+  -H "Authorization: Bearer ${JWT_TOKEN}" \
+  -F "path=large_files/test_31mb.bin" \
+  -F "mode=644" \
+  -F "file=@test_31mb.bin" \
+  -s -o /dev/null -w "HTTP %{http_code} - %{time_total}s\n"
+UPLOAD_END=$(date +%s%3N)
+UPLOAD_TIME=$((UPLOAD_END - UPLOAD_START))
+echo "   Upload completed in ${UPLOAD_TIME}ms"
+
+# Step 3: 验证文件存在和大小
+echo "🔍 Verifying file on server..."
+curl -X POST "${PICOD_URL}/api/execute" \
+  -H "Authorization: Bearer ${JWT_TOKEN}" \
+  -H "Content-Type: application/json" \
+  -s \
+  -d '{"command": ["stat", "-c", "%s %n", "large_files/test_31mb.bin"]}' | jq -r '.stdout'
+
+# Step 4: 计算服务器端 MD5
+echo "🔐 Computing server-side MD5..."
+SERVER_MD5=$(curl -X POST "${PICOD_URL}/api/execute" \
+  -H "Authorization: Bearer ${JWT_TOKEN}" \
+  -H "Content-Type: application/json" \
+  -s \
+  -d '{"command": ["md5sum", "large_files/test_31mb.bin"]}' | jq -r '.stdout' | awk '{print $1}')
+echo "   Server MD5: ${SERVER_MD5}"
+
+# Step 5: 下载文件
+echo "⬇️  Downloading 31MB file..."
+DOWNLOAD_START=$(date +%s%3N)
+curl -X GET "${PICOD_URL}/api/files/large_files/test_31mb.bin" \
+  -H "Authorization: Bearer ${JWT_TOKEN}" \
+  -s -o test_31mb_downloaded.bin \
+  --max-time 300
+DOWNLOAD_END=$(date +%s%3N)
+DOWNLOAD_TIME=$((DOWNLOAD_END - DOWNLOAD_START))
+echo "   Download completed in ${DOWNLOAD_TIME}ms"
+
+# Step 6: 验证下载文件的完整性
+echo "✅ Verifying downloaded file integrity..."
+DOWNLOADED_MD5=$(md5sum test_31mb_downloaded.bin | awk '{print $1}')
+echo "   Downloaded MD5: ${DOWNLOADED_MD5}"
+
+# Step 7: 比对结果
+echo ""
+echo "=== Integrity Check Results ==="
+echo "Original MD5:   ${ORIGINAL_MD5}"
+echo "Server MD5:     ${SERVER_MD5}"
+echo "Downloaded MD5: ${DOWNLOADED_MD5}"
+
+if [ "${ORIGINAL_MD5}" = "${SERVER_MD5}" ] && [ "${SERVER_MD5}" = "${DOWNLOADED_MD5}" ]; then
+  echo ""
+  echo "✅ SUCCESS: All MD5 hashes match!"
+  echo "📊 Performance:"
+  echo "   - Upload speed:   $(echo "scale=2; 31 * 1000 / ${UPLOAD_TIME}" | bc) MB/s"
+  echo "   - Download speed: $(echo "scale=2; 31 * 1000 / ${DOWNLOAD_TIME}" | bc) MB/s"
+
+  # Cleanup
+  rm -f test_31mb.bin test_31mb_downloaded.bin
+  echo "🧹 Cleanup completed"
+else
+  echo ""
+  echo "❌ FAILED: MD5 mismatch detected!"
+  exit 1
+fi
+```
+
+### 多路径文件并发上传测试
+
+```bash
+#!/bin/bash
+set -e
+
+export JWT_TOKEN=$(generate_jwt)
+PICOD_URL="http://localhost:8080"
+
+echo "=== Multi-path Concurrent Upload Test ==="
+
+# 准备测试目录结构
+PATHS=(
+  "data/logs/app.log"
+  "data/logs/error.log"
+  "data/logs/access.log"
+  "config/app.conf"
+  "config/db.conf"
+  "scripts/backup.sh"
+  "scripts/deploy.sh"
+  "docs/api.md"
+  "docs/readme.md"
+  "src/main.py"
+  "src/utils.py"
+  "src/models/user.py"
+  "src/models/session.py"
+)
+
+echo "📦 Preparing ${#PATHS[@]} test files..."
+
+# 创建目录结构
+curl -X POST "${PICOD_URL}/api/execute" \
+  -H "Authorization: Bearer ${JWT_TOKEN}" \
+  -H "Content-Type: application/json" \
+  -s \
+  -d '{"command": ["mkdir", "-p", "data/logs", "config", "scripts", "docs", "src/models"]}' | jq -r '.exit_code'
+
+# 并发上传函数
+upload_file() {
+  local path=$1
+  local content="Test content for ${path}\nTimestamp: $(date)\n"
+  local content_b64=$(echo -e "$content" | base64)
+
+  curl -X POST "${PICOD_URL}/api/files" \
+    -H "Authorization: Bearer ${JWT_TOKEN}" \
+    -H "Content-Type: application/json" \
+    -s \
+    -d "{\"path\": \"${path}\", \"content\": \"${content_b64}\", \"mode\": \"644\"}" \
+    -w "✅ ${path} (%{http_code})\n" \
+    -o /dev/null
+}
+
+export -f upload_file
+export JWT_TOKEN PICOD_URL
+
+# 并发上传（使用 GNU parallel 或 xargs）
+START=$(date +%s%3N)
+
+if command -v parallel &> /dev/null; then
+  # 使用 GNU parallel（推荐，更快）
+  printf "%s\n" "${PATHS[@]}" | parallel -j 10 upload_file
+else
+  # 使用 xargs（备选）
+  printf "%s\n" "${PATHS[@]}" | xargs -P 10 -I {} bash -c "upload_file '{}'"
+fi
+
+END=$(date +%s%3N)
+DURATION=$((END - START))
+
+echo ""
+echo "⏱️  Uploaded ${#PATHS[@]} files in ${DURATION}ms"
+echo "   Average: $((DURATION / ${#PATHS[@]}))ms per file"
+
+# 验证所有文件
+echo ""
+echo "🔍 Verifying all files..."
+for path in "${PATHS[@]}"; do
+  # 检查文件是否存在
+  RESULT=$(curl -X POST "${PICOD_URL}/api/execute" \
+    -H "Authorization: Bearer ${JWT_TOKEN}" \
+    -H "Content-Type: application/json" \
+    -s \
+    -d "{\"command\": [\"test\", \"-f\", \"${path}\"]}" | jq -r '.exit_code')
+
+  if [ "$RESULT" -eq 0 ]; then
+    echo "   ✅ ${path}"
+  else
+    echo "   ❌ ${path} - NOT FOUND"
+  fi
+done
+
+echo ""
+echo "=== Test Completed ==="
 ```
 
 ---
