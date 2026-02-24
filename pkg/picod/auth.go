@@ -455,7 +455,7 @@ func (am *AuthManager) AuthMiddleware() gin.HandlerFunc {
 			actualHash := buildCanonicalRequestHash(c.Request, bodyBytes)
 			if claimedHash != actualHash {
 				// Detailed debug logging for troubleshooting
-				uri := c.Request.URL.Path
+				uri := c.Request.URL.EscapedPath()
 				if uri == "" {
 					uri = "/"
 				}
@@ -531,8 +531,8 @@ func buildCanonicalRequestHash(r *http.Request, body []byte) string {
 	// 1. HTTP Method
 	method := strings.ToUpper(r.Method)
 
-	// 2. Canonical URI (path only)
-	uri := r.URL.Path
+	// 2. Canonical URI (path only, percent-encoded to match what clients sign)
+	uri := r.URL.EscapedPath()
 	if uri == "" {
 		uri = "/"
 	}

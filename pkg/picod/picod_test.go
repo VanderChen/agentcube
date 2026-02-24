@@ -17,6 +17,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -778,6 +779,86 @@ func TestDirectoryUploadDownload(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, http.StatusBadRequest, resp.StatusCode)
 	})
+}
+
+// TestCanonicalRequestHash_NonASCIIFilename verifies that canonical_request_sha256
+// is computed using the percent-encoded URI path, so requests for files with
+// non-ASCII names (e.g. Chinese characters) authenticate correctly.
+func TestCanonicalRequestHash_NonASCIIFilename(t *testing.T) {
+	os.Unsetenv("PICOD_PUBLIC_KEY")
+	os.Unsetenv("PICOD_AUTH_MODE")
+
+	bootstrapPriv, bootstrapPubStr := generateECKeys(t)
+	sessionPriv, sessionPubStr := generateECKeys(t)
+
+	tmpDir, err := os.MkdirTemp("", "picod_nonascii_test")
+	require.NoError(t, err)
+	defer os.RemoveAll(tmpDir)
+
+	originalWd, err := os.Getwd()
+	require.NoError(t, err)
+	err = os.Chdir(tmpDir)
+	require.NoError(t, err)
+	defer func() { require.NoError(t, os.Chdir(originalWd)) }()
+
+	config := Config{
+		Port:         0,
+		BootstrapKey: []byte(bootstrapPubStr),
+		Workspace:    tmpDir,
+	}
+	server := NewServer(config)
+	ts := httptest.NewServer(server.engine)
+	defer ts.Close()
+	client := ts.Client()
+
+	// Initialize
+	sessionPubB64 := base64.RawStdEncoding.EncodeToString([]byte(sessionPubStr))
+	initToken := createToken(t, bootstrapPriv, jwt.MapClaims{
+		"session_public_key": sessionPubB64,
+		"iat":                time.Now().Unix(),
+		"exp":                time.Now().Add(time.Hour).Unix(),
+	})
+	initReq, _ := http.NewRequest("POST", ts.URL+"/init", nil)
+	initReq.Header.Set("Authorization", "Bearer "+initToken)
+	resp, err := client.Do(initReq)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+
+	// Create the file directly on disk so download can succeed
+	chineseFile := "你好.txt"
+	err = os.WriteFile(filepath.Join(tmpDir, chineseFile), []byte("hello chinese"), 0644)
+	require.NoError(t, err)
+
+	// Build canonical_request_sha256 the same way the client would:
+	// use the percent-encoded URI path.
+	encodedPath := "/api/files/%E4%BD%A0%E5%A5%BD.txt"
+	canonicalReq := strings.Join([]string{
+		"GET",
+		encodedPath,
+		"",                // no query string
+		"content-type:application/json\n",
+		"content-type",
+		fmt.Sprintf("%x", sha256.Sum256([]byte{})), // empty body
+	}, "\n")
+	hashBytes := sha256.Sum256([]byte(canonicalReq))
+	canonicalHash := fmt.Sprintf("%x", hashBytes)
+
+	token := createToken(t, sessionPriv, jwt.MapClaims{
+		"canonical_request_sha256": canonicalHash,
+		"iat":                      time.Now().Unix(),
+		"exp":                      time.Now().Add(time.Hour).Unix(),
+	})
+
+	req, _ := http.NewRequest("GET", ts.URL+encodedPath, nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err = client.Do(req)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, resp.StatusCode, "Chinese filename with canonical_request_sha256 should authenticate correctly")
+
+	body, _ := io.ReadAll(resp.Body)
+	assert.Equal(t, "hello chinese", string(body))
 }
 
 func TestParseECPublicKeyFromEncodedString(t *testing.T) {
