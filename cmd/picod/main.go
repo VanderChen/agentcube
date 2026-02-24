@@ -13,6 +13,7 @@ func main() {
 	port := flag.Int("port", 8080, "Port for the PicoD server to listen on")
 	bootstrapKeyFile := flag.String("bootstrap-key", "/etc/picod/public-key.pem", "Path to the bootstrap public key file")
 	workspace := flag.String("workspace", "", "Root directory for file operations (default: current working directory)")
+	maxBodySize := flag.Int64("max-body-size", 64<<20, "Maximum request body size in bytes (default: 64MB)")
 
 	// Initialize klog flags
 	klog.InitFlags(nil)
@@ -41,6 +42,7 @@ func main() {
 		BootstrapKey: bootstrapKey,
 		Workspace:    *workspace,
 		AuthMode:     authMode,
+		MaxBodySize:  *maxBodySize,
 	}
 
 	// Create and start server

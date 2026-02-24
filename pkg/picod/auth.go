@@ -24,8 +24,7 @@ import (
 )
 
 const (
-	keyFile     = "picod_public_key.pem"
-	MaxBodySize = 32 << 20 // 32 MB limit to prevent memory exhaustion
+	keyFile = "picod_public_key.pem"
 )
 
 // AuthManager manages EC public key authentication
@@ -36,6 +35,7 @@ type AuthManager struct {
 	keyFile      string
 	initialized  bool
 	authMode     string
+	maxBodySize  int64  // Maximum request body size in bytes
 	onActivity   func() // Callback to update activity timestamp
 }
 
@@ -50,11 +50,12 @@ type InitResponse struct {
 }
 
 // NewAuthManager creates a new auth manager
-func NewAuthManager(onActivity func()) *AuthManager {
+func NewAuthManager(onActivity func(), maxBodySize int64) *AuthManager {
 	return &AuthManager{
 		keyFile:     keyFile,
 		initialized: false,
 		authMode:    AuthModeDynamic,
+		maxBodySize: maxBodySize,
 		onActivity:  onActivity,
 	}
 }
@@ -404,10 +405,34 @@ func (am *AuthManager) AuthMiddleware() gin.HandlerFunc {
 			return
 		}
 
+		// Enforce maximum body size BEFORE reading to prevent memory exhaustion
+		c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, am.maxBodySize)
+
 		// Read body for canonical request verification
 		var bodyBytes []byte
 		if c.Request.Body != nil {
-			bodyBytes, _ = io.ReadAll(c.Request.Body)
+			var err error
+			bodyBytes, err = io.ReadAll(c.Request.Body)
+			if err != nil {
+				// Check if error is due to body size limit
+				if err.Error() == "http: request body too large" {
+					c.JSON(http.StatusRequestEntityTooLarge, gin.H{
+						"error":  "Request body too large",
+						"code":   http.StatusRequestEntityTooLarge,
+						"detail": fmt.Sprintf("Maximum %d bytes (%.2f MB) allowed", am.maxBodySize, float64(am.maxBodySize)/(1<<20)),
+					})
+					c.Abort()
+					return
+				}
+				// Other read errors
+				c.JSON(http.StatusInternalServerError, gin.H{
+					"error":  "Failed to read request body",
+					"code":   http.StatusInternalServerError,
+					"detail": err.Error(),
+				})
+				c.Abort()
+				return
+			}
 			// Restore body for downstream handlers
 			c.Request.Body = io.NopCloser(bytes.NewBuffer(bodyBytes))
 		}
@@ -490,9 +515,6 @@ REQUEST DETAILS:
 				return
 			}
 		}
-
-		// Enforce maximum body size to prevent memory exhaustion
-		c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, MaxBodySize)
 
 		// Update activity timestamp on successful authentication
 		if am.onActivity != nil {

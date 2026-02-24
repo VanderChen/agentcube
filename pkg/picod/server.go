@@ -28,6 +28,7 @@ type Config struct {
 	BootstrapKey []byte `json:"bootstrap_key"`
 	Workspace    string `json:"workspace"`
 	AuthMode     string `json:"auth_mode"`
+	MaxBodySize  int64  `json:"max_body_size"` // Maximum request body size in bytes (default: 64MB)
 	// Static mode uses PICOD_PUBLIC_KEY env var (base64 encoded PEM)
 }
 
@@ -45,6 +46,11 @@ type Server struct {
 
 // NewServer creates a new PicoD server instance
 func NewServer(config Config) *Server {
+	// Set default MaxBodySize if not specified
+	if config.MaxBodySize <= 0 {
+		config.MaxBodySize = 64 << 20 // Default: 64 MB
+	}
+
 	// Determine TTL from environment variable or use default
 	ttl := time.Duration(DefaultTTL) * time.Second
 	if envTTL := os.Getenv("PICOD_DEFAULT_TTL"); envTTL != "" {
@@ -60,9 +66,10 @@ func NewServer(config Config) *Server {
 		lastActivityAt: now, // Initialize to startup time
 		ttl:            ttl,
 	}
-	// Create auth manager with activity callback
-	s.authManager = NewAuthManager(s.UpdateLastActivity)
+	// Create auth manager with activity callback and max body size
+	s.authManager = NewAuthManager(s.UpdateLastActivity, config.MaxBodySize)
 	klog.Infof("PicoD TTL configured: %v", ttl)
+	klog.Infof("PicoD MaxBodySize configured: %d bytes (%.2f MB)", config.MaxBodySize, float64(config.MaxBodySize)/(1<<20))
 
 	// Initialize workspace directory
 	if config.Workspace != "" {
@@ -81,8 +88,9 @@ func NewServer(config Config) *Server {
 
 	engine := gin.New()
 
-	// Set maximum multipart form memory to 64MB (default is 32MB)
-	engine.MaxMultipartMemory = 64 << 20 // 64 MB
+	// Set maximum multipart form memory to match MaxBodySize
+	// This controls how Gin buffers multipart file uploads in memory
+	engine.MaxMultipartMemory = config.MaxBodySize
 
 	// Global middleware
 	engine.Use(gin.Logger())   // Request logging
