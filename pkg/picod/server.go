@@ -24,11 +24,12 @@ const (
 
 // Config defines server configuration
 type Config struct {
-	Port         int    `json:"port"`
-	BootstrapKey []byte `json:"bootstrap_key"`
-	Workspace    string `json:"workspace"`
-	AuthMode     string `json:"auth_mode"`
-	MaxBodySize  int64  `json:"max_body_size"` // Maximum request body size in bytes (default: 64MB)
+	Port              int    `json:"port"`
+	BootstrapKey      []byte `json:"bootstrap_key"`
+	Workspace         string `json:"workspace"`
+	AuthMode          string `json:"auth_mode"`
+	MaxBodySize       int64  `json:"max_body_size"` // Maximum request body size in bytes (default: 64MB)
+	EncryptionEnabled bool   `json:"encryption_enabled"`
 	// Static mode uses PICOD_PUBLIC_KEY env var (base64 encoded PEM)
 }
 
@@ -60,14 +61,21 @@ func NewServer(config Config) *Server {
 	}
 
 	now := time.Now()
+	// Read encryption enablement
+	encryptionEnabled := os.Getenv("PICOD_ENCRYPTION_ENABLED") == "true"
+	if encryptionEnabled {
+		config.EncryptionEnabled = true
+		klog.Info("Request encryption is ENABLED (PICOD_ENCRYPTION_ENABLED=true)")
+	}
+
 	s := &Server{
 		config:         config,
 		startTime:      now,
 		lastActivityAt: now, // Initialize to startup time
 		ttl:            ttl,
 	}
-	// Create auth manager with activity callback and max body size
-	s.authManager = NewAuthManager(s.UpdateLastActivity, config.MaxBodySize)
+	// Create auth manager with activity callback, max body size and encryption flag
+	s.authManager = NewAuthManager(s.UpdateLastActivity, config.MaxBodySize, config.EncryptionEnabled)
 	klog.Infof("PicoD TTL configured: %v", ttl)
 	klog.Infof("PicoD MaxBodySize configured: %d bytes (%.2f MB)", config.MaxBodySize, float64(config.MaxBodySize)/(1<<20))
 

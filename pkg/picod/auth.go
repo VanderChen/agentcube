@@ -2,7 +2,12 @@ package picod
 
 import (
 	"bytes"
+	"crypto/aes"
+	"crypto/cipher"
+	"crypto/ecdh"
 	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
 	"crypto/sha256"
 	"crypto/x509"
 	"encoding/base64"
@@ -20,6 +25,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/golang-jwt/jwt/v5"
+	"golang.org/x/crypto/hkdf"
 	"k8s.io/klog/v2"
 )
 
@@ -29,34 +35,40 @@ const (
 
 // AuthManager manages EC public key authentication
 type AuthManager struct {
-	publicKey    *ecdsa.PublicKey
-	bootstrapKey *ecdsa.PublicKey // Key injected at startup for init authentication
-	mutex        sync.RWMutex
-	keyFile      string
-	initialized  bool
-	authMode     string
-	maxBodySize  int64  // Maximum request body size in bytes
-	onActivity   func() // Callback to update activity timestamp
+	publicKey         *ecdsa.PublicKey
+	bootstrapKey      *ecdsa.PublicKey // Key injected at startup for init authentication
+	sessionPriv1      *ecdsa.PrivateKey // Temporary session private key (Pair1)
+	mutex             sync.RWMutex
+	keyFile           string
+	initialized       bool
+	authMode          string
+	maxBodySize       int64  // Maximum request body size in bytes
+	encryptionEnabled bool   // Whether request encryption is forced
+	onActivity        func() // Callback to update activity timestamp
 }
 
-// InitRequest represents initialization request with public key
+// InitRequest represents initialization request (legacy)
 type InitRequest struct {
-	PublicKey string `json:"public_key" binding:"required"`
+	PublicKey string `json:"public_key"`
 }
 
-// InitResponse represents initialization response
+// InitResponse represents initialization response with Pair1 information
 type InitResponse struct {
-	Message string `json:"message"`
+	Message            string `json:"message"`
+	Pub1               string `json:"pub1"`                 // Base64(DER) of Pair1 Public Key
+	EphemeralPublicKey string `json:"ephemeral_public_key"` // Base64(DER) of Tmp_Pub
+	Nonce              string `json:"nonce"`                // Base64(12 bytes)
 }
 
 // NewAuthManager creates a new auth manager
-func NewAuthManager(onActivity func(), maxBodySize int64) *AuthManager {
+func NewAuthManager(onActivity func(), maxBodySize int64, encryptionEnabled bool) *AuthManager {
 	return &AuthManager{
-		keyFile:     keyFile,
-		initialized: false,
-		authMode:    AuthModeDynamic,
-		maxBodySize: maxBodySize,
-		onActivity:  onActivity,
+		keyFile:           keyFile,
+		initialized:       false,
+		authMode:          AuthModeDynamic,
+		maxBodySize:       maxBodySize,
+		encryptionEnabled: encryptionEnabled,
+		onActivity:        onActivity,
 	}
 }
 
@@ -242,28 +254,16 @@ func (am *AuthManager) IsInitialized() bool {
 	return am.initialized
 }
 
-// InitHandler handles initialization requests
+// InitHandler handles initialization requests and key negotiation
 func (am *AuthManager) InitHandler(c *gin.Context) {
 	requestStart := time.Now()
-	am.mutex.Lock()
-	defer am.mutex.Unlock()
 
-	// Block init if in static key mode
-	if am.authMode == AuthModeStatic {
+	// Encryption negotiation is only supported in static key mode
+	if am.authMode != AuthModeStatic {
 		c.JSON(http.StatusForbidden, gin.H{
-			"error":  "Static key mode enabled",
+			"error":  "Key negotiation not supported",
 			"code":   http.StatusForbidden,
-			"detail": "Dynamic initialization is disabled in static key mode",
-		})
-		return
-	}
-
-	// Check if already initialized
-	if am.initialized {
-		c.JSON(http.StatusForbidden, gin.H{
-			"error":  "Server already initialized",
-			"code":   http.StatusForbidden,
-			"detail": "This PicoD instance is already owned by another client",
+			"detail": "Encryption negotiation is only available in static key mode",
 		})
 		return
 	}
@@ -290,12 +290,14 @@ func (am *AuthManager) InitHandler(c *gin.Context) {
 
 	tokenString := parts[1]
 
-	// Parse and validate JWT
+	// Parse and validate JWT using the static public key (Pair0)
 	token, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
 		if method, ok := token.Method.(*jwt.SigningMethodECDSA); !ok || method.Alg() != jwt.SigningMethodES256.Alg() {
 			return nil, fmt.Errorf("unexpected signing method: %v, expected ES256", token.Header["alg"])
 		}
-		return am.bootstrapKey, nil
+		am.mutex.RLock()
+		defer am.mutex.RUnlock()
+		return am.publicKey, nil
 	}, jwt.WithExpirationRequired(), jwt.WithIssuedAt(), jwt.WithLeeway(time.Minute))
 
 	if err != nil || !token.Valid {
@@ -307,51 +309,139 @@ func (am *AuthManager) InitHandler(c *gin.Context) {
 		return
 	}
 
-	claims, ok := token.Claims.(jwt.MapClaims)
-	if !ok {
-		c.JSON(http.StatusUnauthorized, gin.H{
-			"error": "Invalid claims",
-			"code":  http.StatusUnauthorized,
-		})
-		return
-	}
-
-	// Extract session_public_key
-	sessionPublicKey, ok := claims["session_public_key"].(string)
-	if !ok || sessionPublicKey == "" {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"error": "Missing session_public_key in token",
-			"code":  http.StatusBadRequest,
-		})
-		return
-	}
-
-	// Save the public key
-	if err := am.savePublicKeyLocked(sessionPublicKey); err != nil {
+	// 1. Generate new session key pair (Pair1)
+	newSessionPriv, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
-			"error": fmt.Sprintf("Failed to save public key: %v", err),
+			"error": "Failed to generate session key pair",
 			"code":  http.StatusInternalServerError,
 		})
 		return
 	}
 
+	// 2. Encrypt Pub1 using Gateway's static public key (ECIES)
+	am.mutex.RLock()
+	pub0 := am.publicKey
+	am.mutex.RUnlock()
+
+	ecPub0, err := pub0.ECDH()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": "Failed to convert Pub0 to ECDH",
+			"code":  http.StatusInternalServerError,
+		})
+		return
+	}
+
+	// Generate temporary key for the response wrapping
+	tmpPriv, err := ecdh.P256().GenerateKey(rand.Reader)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": "Failed to generate temporary key",
+			"code":  http.StatusInternalServerError,
+		})
+		return
+	}
+
+	// Compute shared secret S = ECDH(tmpPriv, ecPub0)
+	sharedSecret, err := tmpPriv.ECDH(ecPub0)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": "Failed to compute shared secret",
+			"code":  http.StatusInternalServerError,
+		})
+		return
+	}
+
+	// Derive wrapping key using HKDF
+	kdf := hkdf.New(sha256.New, sharedSecret, nil, []byte("picod-init-wrap"))
+	wrapKey := make([]byte, 32)
+	if _, err := io.ReadFull(kdf, wrapKey); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": "Failed to derive wrapping key",
+			"code":  http.StatusInternalServerError,
+		})
+		return
+	}
+
+	// Marshal Pub1 to PKIX DER
+	pub1Bytes, err := x509.MarshalPKIXPublicKey(&newSessionPriv.PublicKey)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": "Failed to marshal Pub1",
+			"code":  http.StatusInternalServerError,
+		})
+		return
+	}
+
+	// Encrypt pub1Bytes with wrapKey using AES-GCM
+	block, err := aes.NewCipher(wrapKey)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": "Internal error",
+			"code":  http.StatusInternalServerError,
+		})
+		return
+	}
+	aesGCM, err := cipher.NewGCM(block)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": "Internal error",
+			"code":  http.StatusInternalServerError,
+		})
+		return
+	}
+	nonce := make([]byte, aesGCM.NonceSize())
+	if _, err := rand.Read(nonce); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": "Internal error",
+			"code":  http.StatusInternalServerError,
+		})
+		return
+	}
+	ciphertext := aesGCM.Seal(nil, nonce, pub1Bytes, nil)
+
+	// Save session private key (Pair1)
+	am.mutex.Lock()
+	am.sessionPriv1 = newSessionPriv
+	am.mutex.Unlock()
+
 	c.JSON(http.StatusOK, InitResponse{
-		Message: "Server initialized successfully. This PicoD instance is now locked to your public key.",
+		Message:            "Session key negotiated successfully",
+		Pub1:               base64.StdEncoding.EncodeToString(ciphertext),
+		EphemeralPublicKey: base64.StdEncoding.EncodeToString(tmpPriv.PublicKey().Bytes()),
+		Nonce:              base64.StdEncoding.EncodeToString(nonce),
 	})
 
-	klog.Infof("[InitHandler] Request completed in %.3f seconds", time.Since(requestStart).Seconds())
+	klog.Infof("[InitHandler] Key negotiation completed in %.3f seconds", time.Since(requestStart).Seconds())
 }
 
 // AuthMiddleware creates authentication middleware with JWT verification
 func (am *AuthManager) AuthMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
 
-		// Check if server is initialized
+		// Check if server is initialized (only for dynamic mode or encryption init)
 		if !am.IsInitialized() {
 			c.JSON(http.StatusForbidden, gin.H{
 				"error":  "Server not initialized",
 				"code":   http.StatusForbidden,
 				"detail": fmt.Sprintf("Please initialize this Picod instance first via /init. Request path is %s", c.Request.URL.Path),
+			})
+			c.Abort()
+			return
+		}
+
+		// If encryption is forced, ensure Pair1 is ready
+		am.mutex.RLock()
+		isEncEnabled := am.encryptionEnabled
+		hasSessionKey := am.sessionPriv1 != nil
+		am.mutex.RUnlock()
+
+		if isEncEnabled && !hasSessionKey {
+			c.JSON(http.StatusForbidden, gin.H{
+				"error":  "Encryption required",
+				"code":   http.StatusForbidden,
+				"detail": "Encryption is enabled but session key not initialized. Please call /init first.",
 			})
 			c.Abort()
 			return
@@ -381,15 +471,11 @@ func (am *AuthManager) AuthMiddleware() gin.HandlerFunc {
 
 		tokenString := parts[1]
 
-		// Parse and validate JWT using Session Public Key
+		// Parse and validate JWT using Pair0 (Static Public Key)
 		token, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
 			if method, ok := token.Method.(*jwt.SigningMethodECDSA); !ok || method.Alg() != jwt.SigningMethodES256.Alg() {
 				return nil, fmt.Errorf("unexpected signing method: %v, expected ES256", token.Header["alg"])
 			}
-			// Use the session public key for verification
-			// Lock is handled by IsInitialized check above, but safe to read pointer here
-			// strictly speaking we should lock to read am.publicKey if it can change,
-			// but it's set once at init.
 			am.mutex.RLock()
 			defer am.mutex.RUnlock()
 			return am.publicKey, nil
@@ -408,13 +494,12 @@ func (am *AuthManager) AuthMiddleware() gin.HandlerFunc {
 		// Enforce maximum body size BEFORE reading to prevent memory exhaustion
 		c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, am.maxBodySize)
 
-		// Read body for canonical request verification
+		// Read body for integrity check and decryption
 		var bodyBytes []byte
 		if c.Request.Body != nil {
 			var err error
 			bodyBytes, err = io.ReadAll(c.Request.Body)
 			if err != nil {
-				// Check if error is due to body size limit
 				if err.Error() == "http: request body too large" {
 					c.JSON(http.StatusRequestEntityTooLarge, gin.H{
 						"error":  "Request body too large",
@@ -424,7 +509,6 @@ func (am *AuthManager) AuthMiddleware() gin.HandlerFunc {
 					c.Abort()
 					return
 				}
-				// Other read errors
 				c.JSON(http.StatusInternalServerError, gin.H{
 					"error":  "Failed to read request body",
 					"code":   http.StatusInternalServerError,
@@ -433,79 +517,24 @@ func (am *AuthManager) AuthMiddleware() gin.HandlerFunc {
 				c.Abort()
 				return
 			}
-			// Restore body for downstream handlers
-			c.Request.Body = io.NopCloser(bytes.NewBuffer(bodyBytes))
 		}
 
-		// Verify canonical_request_sha256 claim to prevent request tampering
+		// Verify integrity (Hash of the Ciphertext if encrypted)
 		claims, ok := token.Claims.(jwt.MapClaims)
 		if !ok {
 			c.JSON(http.StatusUnauthorized, gin.H{
-				"error":  "Invalid token claims",
-				"code":   http.StatusUnauthorized,
-				"detail": "Token claims format is invalid",
+				"error": "Invalid token claims",
+				"code":  http.StatusUnauthorized,
 			})
 			c.Abort()
 			return
 		}
 
-		claimedHash, hasHash := claims["canonical_request_sha256"].(string)
-		if hasHash && claimedHash != "" {
-			// Build canonical request and verify
+		claimedHash, _ := claims["canonical_request_sha256"].(string)
+		if claimedHash != "" {
 			actualHash := buildCanonicalRequestHash(c.Request, bodyBytes)
 			if claimedHash != actualHash {
-				// Detailed debug logging for troubleshooting
-				uri := c.Request.URL.EscapedPath()
-				if uri == "" {
-					uri = "/"
-				}
-				queryString := buildCanonicalQueryString(c.Request)
-				canonicalHeaders, signedHeaders := buildCanonicalHeaders(c.Request)
-				bodySha256 := fmt.Sprintf("%x", sha256.Sum256(bodyBytes))
-
-				// Build the actual canonical request string for display
-				canonicalRequest := strings.Join([]string{
-					c.Request.Method,
-					uri,
-					queryString,
-					canonicalHeaders,
-					signedHeaders,
-					bodySha256,
-				}, "\n")
-
-				klog.Warningf(`[AUTH DEBUG] canonical_request_sha256 MISMATCH
-================================================================================
-CLAIMED HASH (from JWT): %s
-ACTUAL HASH (computed):  %s
-================================================================================
-CANONICAL REQUEST COMPONENTS:
-  1. Method:          %s
-  2. URI:             %s
-  3. QueryString:     %s
-  4. CanonicalHeaders: %q
-  5. SignedHeaders:   %s
-  6. BodySHA256:      %s
-================================================================================
-RAW CANONICAL REQUEST (what we hash):
-%s
-================================================================================
-REQUEST DETAILS:
-  Full URL:     %s
-  Content-Type: %s
-  Body Length:  %d bytes
-  Body Preview: %q
-================================================================================`,
-					claimedHash, actualHash,
-					c.Request.Method, uri, queryString, canonicalHeaders, signedHeaders, bodySha256,
-					canonicalRequest,
-					c.Request.URL.String(), c.Request.Header.Get("Content-Type"), len(bodyBytes),
-					func() string {
-						if len(bodyBytes) > 500 {
-							return string(bodyBytes[:500]) + "..."
-						}
-						return string(bodyBytes)
-					}())
-
+				klog.Warningf("[Auth] integrity check failed: expected %s, got %s", claimedHash, actualHash)
 				c.JSON(http.StatusUnauthorized, gin.H{
 					"error":  "Request integrity check failed",
 					"code":   http.StatusUnauthorized,
@@ -516,6 +545,38 @@ REQUEST DETAILS:
 			}
 		}
 
+		// Perform Decryption if enabled
+		if isEncEnabled && len(bodyBytes) > 0 {
+			ephPubB64 := c.GetHeader("X-Picod-Eph-Pub")
+			nonceB64 := c.GetHeader("X-Picod-Nonce")
+
+			if ephPubB64 == "" || nonceB64 == "" {
+				c.JSON(http.StatusUnauthorized, gin.H{
+					"error":  "Decryption failed",
+					"code":   http.StatusUnauthorized,
+					"detail": "Missing encryption metadata headers (X-Picod-Eph-Pub, X-Picod-Nonce)",
+				})
+				c.Abort()
+				return
+			}
+
+			decryptedBody, err := am.decryptHybrid(bodyBytes, ephPubB64, nonceB64)
+			if err != nil {
+				klog.Errorf("[Auth] Decryption failed: %v", err)
+				c.JSON(http.StatusUnauthorized, gin.H{
+					"error":  "Decryption failed",
+					"code":   http.StatusUnauthorized,
+					"detail": fmt.Sprintf("Failed to decrypt request body: %v", err),
+				})
+				c.Abort()
+				return
+			}
+			bodyBytes = decryptedBody
+		}
+
+		// Restore body for downstream handlers
+		c.Request.Body = io.NopCloser(bytes.NewBuffer(bodyBytes))
+
 		// Update activity timestamp on successful authentication
 		if am.onActivity != nil {
 			am.onActivity()
@@ -523,6 +584,67 @@ REQUEST DETAILS:
 
 		c.Next()
 	}
+}
+
+// decryptHybrid performs ECDH + AES-GCM decryption
+func (am *AuthManager) decryptHybrid(ciphertext []byte, ephPubB64, nonceB64 string) ([]byte, error) {
+	ephPubBytes, err := base64.StdEncoding.DecodeString(ephPubB64)
+	if err != nil {
+		return nil, fmt.Errorf("invalid eph-pub encoding: %v", err)
+	}
+
+	nonce, err := base64.StdEncoding.DecodeString(nonceB64)
+	if err != nil {
+		return nil, fmt.Errorf("invalid nonce encoding: %v", err)
+	}
+
+	am.mutex.RLock()
+	priv1 := am.sessionPriv1
+	am.mutex.RUnlock()
+
+	if priv1 == nil {
+		return nil, fmt.Errorf("session key not initialized")
+	}
+
+	// 1. Compute Shared Secret
+	ecEphPub, err := ecdh.P256().NewPublicKey(ephPubBytes)
+	if err != nil {
+		return nil, fmt.Errorf("invalid eph-pub bytes: %v", err)
+	}
+
+	ecPriv1, err := priv1.ECDH()
+	if err != nil {
+		return nil, fmt.Errorf("failed to convert priv1 to ECDH: %v", err)
+	}
+
+	sharedSecret, err := ecPriv1.ECDH(ecEphPub)
+	if err != nil {
+		return nil, fmt.Errorf("ECDH failed: %v", err)
+	}
+
+	// 2. Derive SK using HKDF
+	kdf := hkdf.New(sha256.New, sharedSecret, nil, []byte("picod-business-wrap"))
+	sk := make([]byte, 32)
+	if _, err := io.ReadFull(kdf, sk); err != nil {
+		return nil, fmt.Errorf("HKDF failed: %v", err)
+	}
+
+	// 3. AES-GCM Decrypt
+	block, err := aes.NewCipher(sk)
+	if err != nil {
+		return nil, err
+	}
+	aesGCM, err := cipher.NewGCM(block)
+	if err != nil {
+		return nil, err
+	}
+
+	plaintext, err := aesGCM.Open(nil, nonce, ciphertext, nil)
+	if err != nil {
+		return nil, fmt.Errorf("AES-GCM decryption failed: %v", err)
+	}
+
+	return plaintext, nil
 }
 
 // buildCanonicalRequestHash builds a canonical request string and returns its SHA256 hash

@@ -65,10 +65,16 @@ func TestPicoD_EndToEnd(t *testing.T) {
 	require.NoError(t, err)
 	defer func() { require.NoError(t, os.Chdir(originalWd)) }()
 
+	// Set PICOD_PUBLIC_KEY env var for static mode (base64 encoded)
+	sessionKeyB64 := base64.StdEncoding.EncodeToString([]byte(sessionPubStr))
+	os.Setenv("PICOD_PUBLIC_KEY", sessionKeyB64)
+	defer os.Unsetenv("PICOD_PUBLIC_KEY")
+
 	config := Config{
 		Port:         0, // Test server handles port
 		BootstrapKey: []byte(bootstrapPubStr),
-		Workspace:    tmpDir, // Set workspace to temp dir
+		Workspace:    tmpDir,         // Set workspace to temp dir
+		AuthMode:     AuthModeStatic, // Switch to static mode
 	}
 
 	server := NewServer(config)
@@ -90,29 +96,24 @@ func TestPicoD_EndToEnd(t *testing.T) {
 		req, _ := http.NewRequest("POST", ts.URL+"/api/execute", bytes.NewBuffer(body))
 		resp, err := client.Do(req)
 		require.NoError(t, err)
-		assert.Equal(t, http.StatusForbidden, resp.StatusCode)
+		// In static mode, missing auth should return 401
+		assert.Equal(t, http.StatusUnauthorized, resp.StatusCode)
 	})
 
-	t.Run("Initialization", func(t *testing.T) {
-		// Success Case
-		sessionPubB64 := base64.RawStdEncoding.EncodeToString([]byte(sessionPubStr))
+	t.Run("Negotiation (formerly Initialization)", func(t *testing.T) {
+		// In static mode, InitHandler uses am.publicKey (static key) to verify JWT
 		initClaims := jwt.MapClaims{
-			"session_public_key": sessionPubB64,
-			"iat":                time.Now().Unix(),
-			"exp":                time.Now().Add(time.Hour * 6).Unix(),
+			"iat": time.Now().Unix(),
+			"exp": time.Now().Add(time.Hour * 6).Unix(),
 		}
-		initToken := createToken(t, bootstrapPriv, initClaims)
+		// Sign with sessionPriv which corresponds to the static public key we set in env
+		initToken := createToken(t, sessionPriv, initClaims)
 
 		req, _ := http.NewRequest("POST", ts.URL+"/init", nil)
 		req.Header.Set("Authorization", "Bearer "+initToken)
 		resp, err := client.Do(req)
 		require.NoError(t, err)
 		assert.Equal(t, http.StatusOK, resp.StatusCode)
-
-		// Re-initialization Attempt (Should Fail)
-		resp, err = client.Do(req)
-		require.NoError(t, err)
-		assert.Equal(t, http.StatusForbidden, resp.StatusCode)
 	})
 
 	t.Run("Command Execution", func(t *testing.T) {
@@ -544,16 +545,20 @@ func TestPicoD_StaticKeyMode(t *testing.T) {
 
 	client := ts.Client()
 
-	t.Run("Init Forbidden", func(t *testing.T) {
+	t.Run("Init Allowed for Negotiation", func(t *testing.T) {
 		req, _ := http.NewRequest("POST", ts.URL+"/init", nil)
-		// Try to auth with bootstrap key
-		claims := jwt.MapClaims{"iat": time.Now().Unix()}
-		token := createToken(t, staticPriv, claims) // Wrong key, but endpoint should be blocked anyway or irrelevant
+		// Try to auth with static key
+		claims := jwt.MapClaims{
+			"iat": time.Now().Unix(),
+			"exp": time.Now().Add(time.Hour).Unix(),
+		}
+		token := createToken(t, staticPriv, claims)
 		req.Header.Set("Authorization", "Bearer "+token)
 
 		resp, err := client.Do(req)
 		require.NoError(t, err)
-		assert.Equal(t, http.StatusForbidden, resp.StatusCode)
+		// Should be OK now as it performs negotiation
+		assert.Equal(t, http.StatusOK, resp.StatusCode)
 	})
 
 	t.Run("Execute with Static Key", func(t *testing.T) {
@@ -593,6 +598,7 @@ func TestDirectoryUploadDownload(t *testing.T) {
 
 	// Setup
 	privateKey, publicKeyStr := generateECKeys(t)
+	_ = publicKeyStr // Use to avoid unused variable error if needed, but we use it below
 	tmpDir, err := os.MkdirTemp("", "picod_dir_test")
 	require.NoError(t, err)
 	defer os.RemoveAll(tmpDir)
@@ -603,11 +609,16 @@ func TestDirectoryUploadDownload(t *testing.T) {
 	require.NoError(t, err)
 	defer func() { require.NoError(t, os.Chdir(originalWd)) }()
 
+	// Set PICOD_PUBLIC_KEY env var
+	staticKeyB64 := base64.StdEncoding.EncodeToString([]byte(publicKeyStr))
+	os.Setenv("PICOD_PUBLIC_KEY", staticKeyB64)
+	defer os.Unsetenv("PICOD_PUBLIC_KEY")
+
 	config := Config{
 		Port:         0,
 		BootstrapKey: []byte(publicKeyStr),
 		Workspace:    tmpDir,
-		AuthMode:     "", // Use dynamic mode
+		AuthMode:     AuthModeStatic, // Use static mode
 	}
 
 	server := NewServer(config)
@@ -616,21 +627,9 @@ func TestDirectoryUploadDownload(t *testing.T) {
 
 	client := ts.Client()
 
-	// Initialize server
-	sessionPriv, sessionPubStr := generateECKeys(t)
-	sessionPubB64 := base64.RawStdEncoding.EncodeToString([]byte(sessionPubStr))
-	initClaims := jwt.MapClaims{
-		"session_public_key": sessionPubB64,
-		"iat":                time.Now().Unix(),
-		"exp":                time.Now().Add(time.Hour).Unix(),
-	}
-	initToken := createToken(t, privateKey, initClaims)
-
-	initReq, _ := http.NewRequest("POST", ts.URL+"/init", nil)
-	initReq.Header.Set("Authorization", "Bearer "+initToken)
-	resp, err := client.Do(initReq)
-	require.NoError(t, err)
-	assert.Equal(t, http.StatusOK, resp.StatusCode)
+	// In static mode, we are already initialized. We can skip the old /init registration.
+	// We use privateKey (which corresponds to publicKeyStr) for all further requests.
+	sessionPriv := privateKey 
 
 	// Helper to create authenticated token
 	createAuthToken := func(bodyBytes []byte) string {
@@ -789,7 +788,7 @@ func TestCanonicalRequestHash_NonASCIIFilename(t *testing.T) {
 	os.Unsetenv("PICOD_AUTH_MODE")
 
 	bootstrapPriv, bootstrapPubStr := generateECKeys(t)
-	sessionPriv, sessionPubStr := generateECKeys(t)
+	sessionPriv, _ := generateECKeys(t)
 
 	tmpDir, err := os.MkdirTemp("", "picod_nonascii_test")
 	require.NoError(t, err)
@@ -801,28 +800,25 @@ func TestCanonicalRequestHash_NonASCIIFilename(t *testing.T) {
 	require.NoError(t, err)
 	defer func() { require.NoError(t, os.Chdir(originalWd)) }()
 
+	// Set PICOD_PUBLIC_KEY env var
+	staticKeyB64 := base64.StdEncoding.EncodeToString([]byte(bootstrapPubStr))
+	os.Setenv("PICOD_PUBLIC_KEY", staticKeyB64)
+	defer os.Unsetenv("PICOD_PUBLIC_KEY")
+
 	config := Config{
 		Port:         0,
 		BootstrapKey: []byte(bootstrapPubStr),
 		Workspace:    tmpDir,
+		AuthMode:     AuthModeStatic,
 	}
 	server := NewServer(config)
 	ts := httptest.NewServer(server.engine)
 	defer ts.Close()
 	client := ts.Client()
 
-	// Initialize
-	sessionPubB64 := base64.RawStdEncoding.EncodeToString([]byte(sessionPubStr))
-	initToken := createToken(t, bootstrapPriv, jwt.MapClaims{
-		"session_public_key": sessionPubB64,
-		"iat":                time.Now().Unix(),
-		"exp":                time.Now().Add(time.Hour).Unix(),
-	})
-	initReq, _ := http.NewRequest("POST", ts.URL+"/init", nil)
-	initReq.Header.Set("Authorization", "Bearer "+initToken)
-	resp, err := client.Do(initReq)
-	require.NoError(t, err)
-	require.Equal(t, http.StatusOK, resp.StatusCode)
+	// In static mode, we are already initialized.
+	sessionPriv = bootstrapPriv
+	_ = sessionPriv
 
 	// Create the file directly on disk so download can succeed
 	chineseFile := "你好.txt"
@@ -853,7 +849,7 @@ func TestCanonicalRequestHash_NonASCIIFilename(t *testing.T) {
 	req.Header.Set("Authorization", "Bearer "+token)
 	req.Header.Set("Content-Type", "application/json")
 
-	resp, err = client.Do(req)
+	resp, err := client.Do(req)
 	require.NoError(t, err)
 	assert.Equal(t, http.StatusOK, resp.StatusCode, "Chinese filename with canonical_request_sha256 should authenticate correctly")
 
