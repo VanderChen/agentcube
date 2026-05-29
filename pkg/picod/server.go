@@ -30,6 +30,7 @@ type Config struct {
 	AuthMode          string `json:"auth_mode"`
 	MaxBodySize       int64  `json:"max_body_size"` // Maximum request body size in bytes (default: 64MB)
 	EncryptionEnabled bool   `json:"encryption_enabled"`
+	ForceOctetStream  bool   `json:"force_octet_stream"`
 	// Static mode uses PICOD_PUBLIC_KEY env var (base64 encoded PEM)
 }
 
@@ -68,6 +69,13 @@ func NewServer(config Config) *Server {
 		klog.Info("Request encryption is ENABLED (PICOD_ENCRYPTION_ENABLED=true)")
 	}
 
+	// Read force octet-stream enablement
+	forceOctetStream := os.Getenv("PICOD_FORCE_OCTET_STREAM") == "true"
+	if forceOctetStream {
+		config.ForceOctetStream = true
+		klog.Info("Force octet-stream Content-Type is ENABLED (PICOD_FORCE_OCTET_STREAM=true)")
+	}
+
 	s := &Server{
 		config:         config,
 		startTime:      now,
@@ -103,6 +111,11 @@ func NewServer(config Config) *Server {
 	// Global middleware
 	engine.Use(gin.Logger())   // Request logging
 	engine.Use(gin.Recovery()) // Crash recovery
+
+	// Force Content-Type if enabled
+	if config.ForceOctetStream {
+		engine.Use(s.forceOctetStreamMiddleware())
+	}
 
 	// Load bootstrap key (required for dynamic mode, optional for static mode)
 	if len(config.BootstrapKey) > 0 {
@@ -288,4 +301,27 @@ func (s *Server) HealthCheckHandler(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, response)
+}
+
+// responseWriterWrapper wraps gin.ResponseWriter to force Content-Type
+type responseWriterWrapper struct {
+	gin.ResponseWriter
+}
+
+func (w *responseWriterWrapper) WriteHeader(code int) {
+	w.Header().Set("Content-Type", "application/octet-stream")
+	w.ResponseWriter.WriteHeader(code)
+}
+
+func (w *responseWriterWrapper) Write(b []byte) (int, error) {
+	w.Header().Set("Content-Type", "application/octet-stream")
+	return w.ResponseWriter.Write(b)
+}
+
+func (s *Server) forceOctetStreamMiddleware() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		w := &responseWriterWrapper{ResponseWriter: c.Writer}
+		c.Writer = w
+		c.Next()
+	}
 }

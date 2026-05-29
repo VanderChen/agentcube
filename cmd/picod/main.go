@@ -3,6 +3,7 @@ package main
 import (
 	"flag"
 	"os"
+	"strconv"
 
 	"k8s.io/klog/v2"
 
@@ -37,12 +38,38 @@ func main() {
 		klog.Infof("Bootstrap key not found at %s (optional in static mode)", *bootstrapKeyFile)
 	}
 
+	// Get port from environment variable, default to flag value
+	portVal := *port
+	if envPort := os.Getenv("PICOD_PORT"); envPort != "" {
+		if p, err := strconv.Atoi(envPort); err == nil {
+			portVal = p
+		} else {
+			klog.Warningf("Invalid PICOD_PORT value '%s', using flag value %d", envPort, *port)
+		}
+	}
+
+	// Get workspace from environment variable, default to flag value
+	workspaceVal := *workspace
+	if envWorkspace := os.Getenv("PICOD_WORKSPACE"); envWorkspace != "" {
+		workspaceVal = envWorkspace
+	}
+
+	// Get max body size from environment variable, default to flag value
+	maxBodySizeVal := *maxBodySize
+	if envMaxBodySize := os.Getenv("PICOD_MAX_BODY_SIZE"); envMaxBodySize != "" {
+		if m, err := strconv.ParseInt(envMaxBodySize, 10, 64); err == nil {
+			maxBodySizeVal = m
+		} else {
+			klog.Warningf("Invalid PICOD_MAX_BODY_SIZE value '%s', using flag value %d", envMaxBodySize, *maxBodySize)
+		}
+	}
+
 	config := picod.Config{
-		Port:         *port,
+		Port:         portVal,
 		BootstrapKey: bootstrapKey,
-		Workspace:    *workspace,
+		Workspace:    workspaceVal,
 		AuthMode:     authMode,
-		MaxBodySize:  *maxBodySize,
+		MaxBodySize:  maxBodySizeVal,
 	}
 
 	// Create and start server

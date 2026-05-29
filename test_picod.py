@@ -27,8 +27,10 @@ import argparse
 import random
 from datetime import datetime, timezone
 from typing import Dict, Any, Optional
-from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives import serialization, hashes
 from cryptography.hazmat.primitives.asymmetric import ec
+from cryptography.hazmat.primitives.kdf.hkdf import HKDF
+from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from cryptography.hazmat.backends import default_backend
 import jwt
 
@@ -80,7 +82,7 @@ class MetricsCollector:
 class PicodClient:
     """Client for interacting with PicoD service"""
     
-    def __init__(self, base_url: str, bootstrap_key_path: Optional[str] = None, collector: Optional[MetricsCollector] = None):
+    def __init__(self, base_url: str, bootstrap_key_path: Optional[str] = None, collector: Optional[MetricsCollector] = None, encryption_enabled: bool = False):
         self.base_url = base_url.rstrip('/')
         self.session_private_key = None
         self.session_public_key = None
@@ -88,6 +90,8 @@ class PicodClient:
         self.bootstrap_public_key = None
         self.initialized = False
         self.collector = collector
+        self.encryption_enabled = encryption_enabled
+        self.pair1_pub = None # Session Public Key (Pair1)
         
         # Generate session key pair
         self._generate_session_keys()
@@ -125,13 +129,13 @@ class PicodClient:
         now = datetime.now(timezone.utc)
         claims.update({
             'iat': now,
-            'exp': now.timestamp() + 300
+            'exp': int(now.timestamp() + 300)
         })
         token = jwt.encode(claims, private_key, algorithm='ES256')
         return token
     
     def _build_canonical_request_hash(self, method: str, url: str, body: bytes,
-                                     content_type: Optional[str] = None) -> str:
+                                     headers: Optional[Dict[str, str]] = None) -> str:
         from urllib.parse import urlparse, parse_qs, urlencode
         method = method.upper()
 
@@ -149,8 +153,8 @@ class PicodClient:
 
         canonical_headers = ""
         signed_headers = ""
-        if content_type:
-            canonical_headers = f"content-type:{content_type}\n"
+        if headers and 'Content-Type' in headers:
+            canonical_headers = f"content-type:{headers['Content-Type'].strip()}\n"
             signed_headers = "content-type"
         else:
             canonical_headers = "\n"
@@ -174,12 +178,99 @@ class PicodClient:
             health = self.health_check()
             if health.get('initialized'):
                 self.initialized = True
+                # In static mode, session key is bootstrap key
                 self.session_private_key = self.bootstrap_private_key
                 self.session_public_key = self.bootstrap_public_key
+                
+                # If encryption is enabled, we need to negotiate Pair1
+                if self.encryption_enabled:
+                    return self._negotiate_encryption()
                 return True
             return False
-        except Exception:
+        except Exception as e:
+            print(f"Check initialized failed: {e}")
             return False
+
+    def _negotiate_encryption(self) -> bool:
+        """Negotiate Pair1 session key for encryption"""
+        print("🔑 Negotiating encryption session key...")
+        try:
+            # 1. Create JWT signed with bootstrap key
+            token = self._create_jwt(self.bootstrap_private_key, {})
+            
+            # 2. Call /init
+            url = f"{self.base_url}/init"
+            headers = {'Authorization': f'Bearer {token}'}
+            resp = self._measure_request('POST', url, headers=headers, timeout=10)
+            resp.raise_for_status()
+            
+            data = resp.json()
+            encrypted_pub1 = base64.b64decode(data['pub1'])
+            tmp_pub_bytes = base64.b64decode(data['ephemeral_public_key'])
+            nonce = base64.b64decode(data['nonce'])
+            
+            # 3. Compute shared secret
+            # ephemeral_public_key in response is raw bytes from ecdh.PublicKey().Bytes() (for P-256 it's 65 bytes uncompressed or 33 compressed)
+            # The server uses tmpPriv.PublicKey().Bytes()
+            from cryptography.hazmat.primitives.asymmetric import ec
+            tmp_pub = ec.EllipticCurvePublicKey.from_encoded_point(ec.SECP256R1(), tmp_pub_bytes)
+            
+            shared_secret = self.bootstrap_private_key.exchange(ec.ECDH(), tmp_pub)
+            
+            # 4. Derive wrapKey
+            hkdf = HKDF(
+                algorithm=hashes.SHA256(),
+                length=32,
+                salt=None,
+                info=b"picod-init-wrap",
+                backend=default_backend()
+            )
+            wrap_key = hkdf.derive(shared_secret)
+            
+            # 5. Decrypt Pub1
+            aesgcm = AESGCM(wrap_key)
+            pub1_der = aesgcm.decrypt(nonce, encrypted_pub1, None)
+            
+            # 6. Parse Pub1
+            self.pair1_pub = serialization.load_der_public_key(pub1_der, backend=default_backend())
+            print("✅ Encryption session key negotiated successfully")
+            return True
+        except Exception as e:
+            print(f"❌ Encryption negotiation failed: {e}")
+            import traceback
+            traceback.print_exc()
+            return False
+
+    def _encrypt_body(self, body: bytes) -> (bytes, str, str):
+        """Encrypt request body using Hybrid approach"""
+        # 1. Generate ephemeral key pair
+        eph_priv = ec.generate_private_key(ec.SECP256R1(), default_backend())
+        eph_pub = eph_priv.public_key()
+        
+        # 2. Compute shared secret with Pair1_Pub
+        shared_secret = eph_priv.exchange(ec.ECDH(), self.pair1_pub)
+        
+        # 3. Derive session key (SK)
+        hkdf = HKDF(
+            algorithm=hashes.SHA256(),
+            length=32,
+            salt=None,
+            info=b"picod-business-wrap",
+            backend=default_backend()
+        )
+        sk = hkdf.derive(shared_secret)
+        
+        # 4. AES-GCM Encrypt
+        nonce = os.urandom(12)
+        aesgcm = AESGCM(sk)
+        ciphertext = aesgcm.encrypt(nonce, body, None)
+        
+        # 5. Return results
+        eph_pub_bytes = eph_pub.public_bytes(
+            encoding=serialization.Encoding.X962,
+            format=serialization.PublicFormat.UncompressedPoint
+        )
+        return ciphertext, base64.b64encode(eph_pub_bytes).decode(), base64.b64encode(nonce).decode()
     
     def _measure_request(self, method, url, **kwargs):
         start_time = time.time()
@@ -192,6 +283,13 @@ class PicodClient:
         try:
             resp = requests.request(method, url, **kwargs)
             status_code = resp.status_code
+            
+            # If PICOD_FORCE_OCTET_STREAM is enabled, verify Content-Type
+            if os.getenv('TEST_FORCE_OCTET') == 'true':
+                ct = resp.headers.get('Content-Type', '')
+                if ct != 'application/octet-stream':
+                    print(f"  ⚠️ Warning: Expected application/octet-stream, got {ct}")
+            
             return resp
         except Exception as e:
             error_msg = str(e)
@@ -203,15 +301,19 @@ class PicodClient:
 
     def _make_authenticated_request(self, method: str, path: str,
                                    json_data: Optional[Dict] = None,
-                                   params: Optional[Dict] = None) -> requests.Response:
+                                   params: Optional[Dict] = None,
+                                   data: Optional[bytes] = None,
+                                   content_type: Optional[str] = None) -> requests.Response:
         if not self.initialized:
             raise Exception("PicoD not initialized")
 
         body = b''
-        content_type = None
         if json_data:
             body = json.dumps(json_data).encode()
-            content_type = 'application/json'
+            content_type = content_type or 'application/json'
+        elif data:
+            body = data
+            content_type = content_type or 'application/octet-stream'
 
         # Build full URL with query parameters for signing
         url = f"{self.base_url}{path}"
@@ -222,19 +324,28 @@ class PicodClient:
         else:
             full_url_for_signing = url
 
+        headers = {}
+        if content_type:
+            headers['Content-Type'] = content_type
+
+        # Perform encryption if enabled
+        if self.encryption_enabled and body:
+            encrypted_body, eph_pub_b64, nonce_b64 = self._encrypt_body(body)
+            body = encrypted_body
+            headers['X-Picod-Eph-Pub'] = eph_pub_b64
+            headers['X-Picod-Nonce'] = nonce_b64
+            # Content-Type for the POST request is still the original one (e.g. application/json)
+            # but the actual body is binary.
+
         canonical_hash = self._build_canonical_request_hash(
-            method, full_url_for_signing, body, content_type
+            method, full_url_for_signing, body, headers
         )
 
         token = self._create_jwt(self.session_private_key, {
             'canonical_request_sha256': canonical_hash
         })
 
-        headers = {
-            'Authorization': f'Bearer {token}'
-        }
-        if content_type:
-            headers['Content-Type'] = content_type
+        headers['Authorization'] = f'Bearer {token}'
 
         return self._measure_request(
             method,
@@ -282,29 +393,13 @@ class PicodClient:
         body_parts.append(b'')
         
         body = b'\r\n'.join(body_parts)
-        
         content_type = f'multipart/form-data; boundary={boundary}'
         
-        canonical_hash = self._build_canonical_request_hash(
-            'POST', '/api/run_python_file', body, content_type
-        )
-        
-        token = self._create_jwt(self.session_private_key, {
-            'canonical_request_sha256': canonical_hash
-        })
-        
-        headers = {
-            'Authorization': f'Bearer {token}',
-            'Content-Type': content_type
-        }
-        
-        url = f"{self.base_url}/api/run_python_file"
-        resp = self._measure_request(
+        resp = self._make_authenticated_request(
             'POST',
-            url,
-            headers=headers,
+            '/api/run_python_file',
             data=body,
-            timeout=30
+            content_type=content_type
         )
         return resp.json()
     
@@ -377,32 +472,12 @@ class PicodClient:
         body = b''.join(parts)
         content_type = f'multipart/form-data; boundary={boundary}'
 
-        # Sign with actual body and content-type
-        canonical_hash = self._build_canonical_request_hash(
-            'POST', '/api/files', body, content_type
+        resp = self._make_authenticated_request(
+            'POST',
+            '/api/files',
+            data=body,
+            content_type=content_type
         )
-
-        token = self._create_jwt(self.session_private_key, {
-            'canonical_request_sha256': canonical_hash
-        })
-
-        headers = {
-            'Authorization': f'Bearer {token}',
-            'Content-Type': content_type
-        }
-
-        url = f"{self.base_url}/api/files"
-
-        start_time = time.time()
-        import requests
-        resp = requests.post(url, data=body, headers=headers, timeout=60)
-        duration = time.time() - start_time
-
-        if self.collector:
-            self.collector.add('/api/files', 'POST', duration, resp.status_code,
-                             "" if resp.ok else resp.text)
-
-        resp.raise_for_status()
         return resp.json()
     
     def list_files(self, path: str = ".") -> Dict[str, Any]:
@@ -605,6 +680,7 @@ def main():
     parser.add_argument('--cpu-limit', default='unknown')
     parser.add_argument('--output-csv', required=True)
     parser.add_argument('--mode', choices=['functional', 'concurrent', 'all'], default='all')
+    parser.add_argument('--encryption', action='store_true', help='Enable request encryption')
     args = parser.parse_args()
 
     # Ensure output directory exists
@@ -612,7 +688,8 @@ def main():
 
     extra_fields = {
         'concurrency_level': args.concurrency,
-        'cpu_limit': args.cpu_limit
+        'cpu_limit': args.cpu_limit,
+        'encryption': args.encryption
     }
     
     collector = MetricsCollector(args.output_csv, extra_fields)
@@ -629,7 +706,7 @@ def main():
         # Warning: Public key on server side must match!
         # The shell script ensures this. If running standalone python, this might fail auth if server has different key.
         
-    client = PicodClient(args.url, args.key, collector)
+    client = PicodClient(args.url, args.key, collector, encryption_enabled=args.encryption)
 
     # Wait for readiness
     ready = False

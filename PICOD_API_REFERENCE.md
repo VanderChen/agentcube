@@ -21,10 +21,13 @@
   - [11. 设置TTL](#11-设置ttl)
 - [测试示例](#测试示例)
 - [常见问题](#常见问题)
+- [网关集成指南 (Java 加密示例)](#网关集成指南)
 
 ---
 
 ## 概述
+
+对于需要从网关集成 Picod 并启用加密传输的开发者，请参考：[Picod Gateway 集成指南](docs/devguide/picod-gateway-guide.md)。
 
 PicoD 是一个安全的代码执行环境服务，支持：
 
@@ -33,7 +36,7 @@ PicoD 是一个安全的代码执行环境服务，支持：
 - 文件上传、下载、列表
 - 文件夹批量上传、打包下载
 - TTL（生存时间）管理
-- 基于 RSA-PSS JWT 的强认证机制
+- 基于 EC (ES256) JWT 的强认证机制
 
 ### 特性说明
 
@@ -61,7 +64,7 @@ PicoD 是一个安全的代码执行环境服务，支持：
    - **不需要**调用 `/init` 接口
 
 3. **JWT 要求**:
-   - 签名算法: `PS256` (RSA-PSS with SHA-256)
+   - 签名算法: `ES256` (ECDSA using P-256 and SHA-256)
    - 必需声明: `exp` (过期时间), `iat` (签发时间)
    - 可选声明: `canonical_request_sha256` (请求完整性校验)
 
@@ -95,22 +98,37 @@ canonical_request_sha256 = hex(sha256(canonical_request))
 ### 服务器启动
 
 ```bash
-# 1. 生成 RSA 密钥对
-openssl genrsa -out private_key.pem 2048
-openssl rsa -in private_key.pem -pubout -out public_key.pem
+# 1. 生成 EC 密钥对 (P-256)
+openssl ecparam -name prime256v1 -genkey -noout -out private_key.pem
+openssl ec -in private_key.pem -pubout -out public_key.pem
 
 # 2. Base64 编码公钥
 export PICOD_PUBLIC_KEY=$(cat public_key.pem | base64 -w 0)
-
 # 3. 启动 PicoD 容器
 docker run -d --name picod \
-  -p 8080:8080 \
+  -p 8888:8888 \
+  -e PICOD_PORT=8888 \
+  -e PICOD_FORCE_OCTET_STREAM=true \
   -e PICOD_AUTH_MODE=static \
   -e PICOD_PUBLIC_KEY="${PICOD_PUBLIC_KEY}" \
   -e PICOD_DEFAULT_TTL=3600 \
   picod:latest
 ```
 
+### 环境变量说明
+
+| 变量名 | 说明 | 默认值 |
+| :--- | :--- | :--- |
+| `PICOD_PORT` | 服务监听端口 | `8080` |
+| `PICOD_FORCE_OCTET_STREAM` | 是否强制所有响应返回 `application/octet-stream` 类型 | `false` |
+| `PICOD_AUTH_MODE` | 认证模式 (`static` 或 `dynamic`) | `dynamic` |
+| `PICOD_PUBLIC_KEY` | (Static模式) Base64 编码的 RSA/EC 公钥 PEM | - |
+| `PICOD_DEFAULT_TTL` | 默认生存时间（秒） | `900` |
+| `PICOD_ENCRYPTION_ENABLED` | 是否启用请求加密 | `false` |
+| `PICOD_WORKSPACE` | 工作目录路径 | 当前目录 |
+| `PICOD_MAX_BODY_SIZE` | 最大请求体大小（字节） | `67108864` (64MB) |
+
+---
 ### 客户端准备
 
 准备 Python 脚本使用私钥生成 JWT：
@@ -149,8 +167,8 @@ def generate_jwt(method, uri, body='', headers=None):
         'canonical_request_sha256': canonical_hash
     }
 
-    # 使用 PS256 签名
-    token = jwt.encode(payload, private_key, algorithm='PS256')
+    # 使用 ES256 签名
+    token = jwt.encode(payload, private_key, algorithm='ES256')
     return token
 
 # 示例：生成不包含 canonical_request_sha256 的简单 JWT（用于测试）
@@ -161,7 +179,7 @@ def generate_simple_jwt():
         'exp': now + 300,
         'iat': now
     }
-    return jwt.encode(payload, private_key, algorithm='PS256')
+    return jwt.encode(payload, private_key, algorithm='ES256')
 
 # 测试用
 token = generate_simple_jwt()

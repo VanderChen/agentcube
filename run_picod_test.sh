@@ -43,7 +43,8 @@ generate_keys() {
 
 start_picod() {
     local cpu_limit=$1
-    echo -e "${BLUE}🚀 Starting PicoD (CPUs: $cpu_limit)...${NC}"
+    local encryption_enabled="${PICOD_ENCRYPTION_ENABLED:-false}"
+    echo -e "${BLUE}🚀 Starting PicoD (CPUs: $cpu_limit, Port: $PICOD_PORT, Encryption: $encryption_enabled, ForceOctet: ${PICOD_FORCE_OCTET_STREAM:-false})...${NC}"
     
     cleanup # Ensure clean slate
 
@@ -56,7 +57,10 @@ start_picod() {
     docker run -d \
         --name "$CONTAINER_NAME" \
         --cpus="$cpu_limit" \
-        -p "$PICOD_PORT:8080" \
+        -p "$PICOD_PORT:$PICOD_PORT" \
+        -e PICOD_PORT="$PICOD_PORT" \
+        -e PICOD_FORCE_OCTET_STREAM="${PICOD_FORCE_OCTET_STREAM:-false}" \
+        -e PICOD_ENCRYPTION_ENABLED="$encryption_enabled" \
         -e PICOD_AUTH_MODE=static \
         -e PICOD_PUBLIC_KEY="$PUBLIC_KEY_B64" \
         "$PICOD_IMAGE" >/dev/null
@@ -76,18 +80,23 @@ start_picod() {
 run_test_scenario() {
     local cpu=$1
     local conc=$2
+    local encryption_flag=""
+    if [ "${PICOD_ENCRYPTION_ENABLED:-false}" == "true" ]; then
+        encryption_flag="--encryption"
+    fi
     
-    echo -e "${YELLOW}👉 Running Scenario: CPU=$cpu, Concurrency=$conc${NC}"
+    echo -e "${YELLOW}👉 Running Scenario: CPU=$cpu, Concurrency=$conc, Encryption=${PICOD_ENCRYPTION_ENABLED:-false}${NC}"
     
     # Run the python test script
     # We pass the same output csv file to accumulate results
-    if python3 test_picod.py \
+    if TEST_FORCE_OCTET="${PICOD_FORCE_OCTET_STREAM:-false}" python3 test_picod.py \
         --url "http://localhost:$PICOD_PORT" \
         --key "$BOOTSTRAP_PRIVATE_KEY" \
         --concurrency "$conc" \
         --cpu-limit "$cpu" \
         --output-csv "$OUTPUT_CSV" \
-        --mode "concurrent"; then
+        --mode "concurrent" \
+        $encryption_flag; then
             echo -e "${GREEN}✅ Scenario passed${NC}"
     else
             echo -e "${RED}❌ Scenario failed${NC}"
@@ -111,11 +120,28 @@ main() {
         pip3 install -q requests cryptography pyjwt
     fi
 
+    local encryption_flag=""
+    if [ "${PICOD_ENCRYPTION_ENABLED:-false}" == "true" ]; then
+        encryption_flag="--encryption"
+    fi
+
     # 1. Run Functional Sanity Check (Single point)
     # run with 1.0 cpu and 1 concurrency just to verify image works
     start_picod "1.0"
     echo -e "${BLUE}Running Functional Sanity Check...${NC}"
-    python3 test_picod.py --url "http://localhost:$PICOD_PORT" --key "$BOOTSTRAP_PRIVATE_KEY" --concurrency 1 --cpu-limit "1.0" --output-csv "$OUTPUT_CSV" --mode "functional"
+    if TEST_FORCE_OCTET="${PICOD_FORCE_OCTET_STREAM:-false}" python3 test_picod.py \
+        --url "http://localhost:$PICOD_PORT" \
+        --key "$BOOTSTRAP_PRIVATE_KEY" \
+        --concurrency 1 \
+        --cpu-limit "1.0" \
+        --output-csv "$OUTPUT_CSV" \
+        --mode "functional" \
+        $encryption_flag; then
+        echo -e "${GREEN}✅ Functional check passed${NC}"
+    else
+        echo -e "${RED}❌ Functional check failed${NC}"
+        exit 1
+    fi
     cleanup
 
     # 2. Run Benchmark Matrix
