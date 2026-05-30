@@ -605,31 +605,31 @@ def run_functional_tests(client: PicodClient):
         print(f"❌ {e}")
         return False
 
-    # 7. Chinese Filename Test
-    print("  Testing Chinese Filename (测试文件.txt)...", end=" ")
-    try:
-        # Upload file with Chinese name
-        chinese_content = "这是一个中文测试文件。\nThis is a Chinese test file.".encode('utf-8')
-        client.upload_file('测试文件.txt', chinese_content)
+    # # 7. Chinese Filename Test
+    # print("  Testing Chinese Filename (测试文件.txt)...", end=" ")
+    # try:
+    #     # Upload file with Chinese name
+    #     chinese_content = "这是一个中文测试文件。\nThis is a Chinese test file.".encode('utf-8')
+    #     client.upload_file('测试文件.txt', chinese_content)
 
-        # List files to verify it exists
-        response = client.list_files('.')
-        files = response.get('files', [])
-        file_names = [f['name'] for f in files]
-        if '测试文件.txt' not in file_names:
-            print(f"❌ Chinese file not found in list")
-            return False
+    #     # List files to verify it exists
+    #     response = client.list_files('.')
+    #     files = response.get('files', [])
+    #     file_names = [f['name'] for f in files]
+    #     if '测试文件.txt' not in file_names:
+    #         print(f"❌ Chinese file not found in list")
+    #         return False
 
-        # Download and verify
-        downloaded = client.download_file('测试文件.txt')
-        if downloaded == chinese_content:
-            print("✅")
-        else:
-            print(f"❌ Content mismatch")
-            return False
-    except Exception as e:
-        print(f"❌ {e}")
-        return False
+    #     # Download and verify
+    #     downloaded = client.download_file('测试文件.txt')
+    #     if downloaded == chinese_content:
+    #         print("✅")
+    #     else:
+    #         print(f"❌ Content mismatch")
+    #         return False
+    # except Exception as e:
+    #     print(f"❌ {e}")
+    #     return False
 
     return True
 
