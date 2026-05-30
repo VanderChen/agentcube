@@ -136,12 +136,14 @@ class PicodClient:
     
     def _build_canonical_request_hash(self, method: str, url: str, body: bytes,
                                      headers: Optional[Dict[str, str]] = None) -> str:
-        from urllib.parse import urlparse, parse_qs, urlencode
+        from urllib.parse import urlparse, parse_qs, quote
         method = method.upper()
 
         # Parse URL to extract path and query string
         parsed = urlparse(url)
-        uri = parsed.path if parsed.path else "/"
+        # Use quote to ensure path is percent-encoded like Go's EscapedPath()
+        # safe='/' because we want to keep slashes
+        uri = quote(parsed.path, safe='/') if parsed.path else "/"
 
         # Build canonical query string (sorted)
         query_string = ""
