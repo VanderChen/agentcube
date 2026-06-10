@@ -25,6 +25,8 @@ import threading
 import csv
 import argparse
 import random
+import tempfile
+import re
 from datetime import datetime, timezone
 from typing import Dict, Any, Optional
 from cryptography.hazmat.primitives import serialization, hashes
@@ -305,7 +307,8 @@ class PicodClient:
                                    json_data: Optional[Dict] = None,
                                    params: Optional[Dict] = None,
                                    data: Optional[bytes] = None,
-                                   content_type: Optional[str] = None) -> requests.Response:
+                                   content_type: Optional[str] = None,
+                                   request_timeout: float = 30) -> requests.Response:
         if not self.initialized:
             raise Exception("PicoD not initialized")
 
@@ -355,7 +358,7 @@ class PicodClient:
             headers=headers,
             data=body if body else None,
             params=params,
-            timeout=30
+            timeout=request_timeout
         )
     
     def health_check(self) -> Dict[str, Any]:
@@ -368,7 +371,8 @@ class PicodClient:
         response = self._make_authenticated_request(
             'POST',
             '/api/run_python',
-            json_data={'code': code, 'timeout': timeout}
+            json_data={'code': code, 'timeout': timeout},
+            request_timeout=self._request_timeout_for_picod_timeout(timeout)
         )
         return response.json()
 
@@ -401,9 +405,43 @@ class PicodClient:
             'POST',
             '/api/run_python_file',
             data=body,
-            content_type=content_type
+            content_type=content_type,
+            request_timeout=self._request_timeout_for_picod_timeout(timeout)
         )
         return resp.json()
+
+    @staticmethod
+    def _request_timeout_for_picod_timeout(timeout: str, buffer_seconds: float = 10.0) -> float:
+        """HTTP client timeout must exceed the PicoD execution timeout."""
+        duration_seconds = PicodClient._parse_go_duration_seconds(timeout)
+        if duration_seconds is None:
+            return 30
+        return max(30, duration_seconds + buffer_seconds)
+
+    @staticmethod
+    def _parse_go_duration_seconds(timeout: str) -> Optional[float]:
+        if not timeout:
+            return None
+
+        units = {
+            'ns': 1e-9,
+            'us': 1e-6,
+            'µs': 1e-6,
+            'ms': 1e-3,
+            's': 1,
+            'm': 60,
+            'h': 3600,
+        }
+        total = 0.0
+        position = 0
+        for match in re.finditer(r'(\d+(?:\.\d+)?)(ns|us|µs|ms|s|m|h)', timeout):
+            if match.start() != position:
+                return None
+            total += float(match.group(1)) * units[match.group(2)]
+            position = match.end()
+        if position != len(timeout):
+            return None
+        return total
     
     def execute_command(self, command: list, timeout: str = "30s", 
                        working_dir: str = None) -> Dict[str, Any]:
@@ -545,6 +583,77 @@ def run_functional_tests(client: PicodClient):
     except Exception as e:
         print(f"❌ {e}")
         return False
+
+    # 3b. Python Timeout
+    print("  Testing Python Timeout (while True print)...", end=" ")
+    try:
+        code_timeout = base64.b64encode(
+            b"import time\nwhile True:\n    print(1, flush=True)\n    time.sleep(0.01)\n"
+        ).decode()
+        res = client.simple_run_python(code_timeout, timeout="1s")
+        stdout_prefix = res.get('stdout', '')[:40].replace('\n', '\\n')
+        stderr = res.get('stderr', '')
+        if res.get('exit_code') == 124 and 'Command timed out' in res.get('stderr', ''):
+            print(f"✅ exit_code={res.get('exit_code')}, stderr={stderr!r}, stdout_prefix={stdout_prefix!r}")
+        else:
+            print(f"❌ Expected exit code 124 and timeout message, got: {res}")
+            return False
+    except Exception as e:
+        print(f"❌ {e}")
+        return False
+
+    # 3c. Python Long Timeout
+    print("  Testing Python Long Timeout (60s)...", end=" ")
+    try:
+        code_long_timeout = base64.b64encode(
+            b"import time\nwhile True:\n    print(1, flush=True)\n    time.sleep(0.5)\n"
+        ).decode()
+        start = time.time()
+        res = client.simple_run_python(code_long_timeout, timeout="60s")
+        elapsed = time.time() - start
+        stderr = res.get('stderr', '')
+        duration = res.get('duration')
+        stdout_prefix = res.get('stdout', '')[:40].replace('\n', '\\n')
+        if (
+            res.get('exit_code') == 124 and
+            'Command timed out' in stderr and
+            55 <= elapsed <= 80
+        ):
+            print(
+                f"✅ exit_code={res.get('exit_code')}, "
+                f"elapsed={elapsed:.2f}s, duration={duration}, "
+                f"stderr={stderr!r}, stdout_prefix={stdout_prefix!r}"
+            )
+        else:
+            print(
+                f"❌ Expected timeout near 60s, got elapsed={elapsed:.2f}s, "
+                f"response={res}"
+            )
+            return False
+    except Exception as e:
+        print(f"❌ {e}")
+        return False
+
+    # 3d. Python File Timeout
+    print("  Testing Python File Timeout...", end=" ")
+    timeout_file_path = None
+    try:
+        with tempfile.NamedTemporaryFile("w", suffix=".py", delete=False) as f:
+            f.write("import time; time.sleep(3); print('done')")
+            timeout_file_path = f.name
+        
+        res = client.run_python_file(timeout_file_path, timeout="1s")
+        if res.get('exit_code') == 124 and 'Command timed out' in res.get('stderr', ''):
+            print("✅")
+        else:
+            print(f"❌ Expected exit code 124 and timeout message, got: {res}")
+            return False
+    except Exception as e:
+        print(f"❌ {e}")
+        return False
+    finally:
+        if timeout_file_path and os.path.exists(timeout_file_path):
+            os.remove(timeout_file_path)
 
     # 4. TTL
     print("  Setting TTL...", end=" ")
