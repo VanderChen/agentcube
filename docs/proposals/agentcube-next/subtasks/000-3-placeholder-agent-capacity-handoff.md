@@ -1,0 +1,114 @@
+# 000-3 — 容量交接：placeholder-agent 与节点适配器的容量接口
+
+## 基本信息
+
+| 项 | 值 |
+|---|---|
+| 所属 | 总体任务 `000`，第一版，里程碑 A |
+| 目标项目 | `agentcube` |
+| 基线分支 | `upstream/main`；开工时取当时的 commit 记在这里（规划时是 `6dafef4a`） |
+| 任务分支 | `feat/000-3-placeholder-agent-capacity-handoff`，尚未创建 |
+| 依赖 | 000-1、000-2 |
+| 验证环境 | 开发机上的 Kind，接假运行时 |
+| 状态 | 未开始 |
+
+总体计划和决定事项的编号见 [README](../README.md)。接缝的编号见 [seams.md](../seams.md)。
+
+## 目标
+
+把占位 Pod 在 Kubernetes 里记下的容量交给节点上的运行时，并保证两本账的次序：kubelet 分配之后才向节点应用容量，占位 Pod 不在位时停止准入。本子任务用一个假运行时把这条链路跑通，不需要 KVM。
+
+本子任务证明的是通用机制，即档 0 加假运行时。真运行时之下，`placeholder-agent` 怎样拿到适配器的 socket 取决于节点栈的部署形态，在 000-6 里结合 000-5 的结论落定。
+
+## 范围
+
+1. **`placeholder-agent`。** 新的二进制，按 D8 以 DaemonSet 运行。
+   - 监听本节点的池，以及池命名空间里绑定在本节点上的 Pod。
+   - 只凭 Pod 对象判定承载体是否在位：存在、绑定在本节点、没有删除时间戳、不是 Failed，并且 UID 等于池状态里控制器记录的那个。不按标签认 Pod，不依赖运行时的事件。
+   - 分配闸门：占位 Pod 被 kubelet 准入并且 Running、容器级已分配的 requests 不低于目标，才第一次应用容量。换了承载体之后同样要过闸门。
+   - 应用容量之后回读，`ResourceSynced` 依据回读值，不依据调用是否成功。
+   - 承载体不在位时通知适配器停止新的准入，池和已有沙箱保留。
+   - 写池的状态（用 server-side apply 和自己的字段管理者）、Conditions、运行时的信息、节点适配器的监听地址；续租 Lease。沙箱调度器以后从池的状态里发现适配器的地址。
+   - 配合 finalizer 做排空和移除池：池里没有沙箱时确认停用，控制器才放行删除。
+2. **节点适配器的骨架。** 新的二进制。本子任务只做容量接口的服务端：
+   - 本地 Unix socket，靠文件权限和对端凭据保护；
+   - 运行时驱动的内部接口，以及一个假运行时驱动：内存里的账本，可以注入失败；
+   - 操作号与最近一次操作的记录，结构按 000-1；第一版操作号固定为初值；
+   - 池状态带单调序号，序号的纪元落盘；
+   - 保存占位 Pod 的 UID 与命名空间；记下每次已应用容量的取值与时间。
+
+## 与 sandbox-pool 的关系
+
+源码可以复用，但复用不是要求（D9）。`placeholder-agent` 的主体新写，只取几个片段。路径相对于私有仓库 `kuasar-sandbox/sandbox-pool` 的根，`main` @ `e440730b`。
+
+**为什么主体新写。** sandbox-pool 的 agent 有四个大文件，合计 2472 行：`pkg/agent/types.go`、`crd_watcher.go`、`status_reporter.go`、`cmd/placeholder-agent/main.go`。逐函数看：
+
+- 中心结构体约 70 个字段，其中约 20 个是 node-ctl 的，另有密钥材料、改容量、shim 任务表的字段。
+- 它用动态客户端加标签选择器监听池，对象以非结构化的形式到达再转换。池是调度之后按标签“绑定”到节点的，一个节点可以绑多个。提案要的是按节点名选池，同时监听 Pod。
+- 主函数 385 行，大半在处理密钥材料和 node-ctl。
+- 状态上报按多池分摊容量。
+
+agentcube 已经在用 controller-runtime，000-1 会为新的 API 组生成有类型的客户端。在这个基础上新写，比把现有骨架改过去省事，也不会把多池和 node-ctl 的假设带进来。
+
+**取用的片段。**
+
+| 来源 | 行数 | 说明 |
+|---|---|---|
+| `pkg/agent/status_reporter.go` 的 `renewLease` | 约 70 | 用 server-side apply 续租 Lease，带逐次调用的超时。Lease 的名字按 000-1 的结论改 |
+| `pkg/agent/status_reporter.go` 的 `setCondition`、`applyConditions`、`statusEqualIgnoringHeartbeats` | 约 100 | condition 的设置，以及“状态没有变化就不写”的比较 |
+| `pkg/agent/flock_linux.go`、`flock_other.go` | 85 | 进程单例锁 |
+| `pkg/agent/config_merge.go` 的 `atomicWriteConfig` | 约 30 | 原子写文件，节点适配器落盘时用 |
+
+**作参考，不取用。**
+
+- `crd_watcher.go` 里监听的看门狗和断线之后的对账，思路可以参考。
+- `nodectl_manager.go`“写完配置即认为生效”的做法，提案明确不采用。
+- `materials.go`、`manifest_key.go` 替运行时管理密钥材料，提案明确不采用。
+- `pool_resize.go`、`pod_spec_updater.go` 是运行中改容量，第四版按 `/resize` 另写。
+- agent 的 19 个测试文件建在自写的内存客户端上，用例场景作参考。
+
+节点适配器的骨架、容量接口的服务端和假运行时，在 sandbox-pool 里没有对应的东西。
+
+凡是取用的片段，出处记在本子任务的实施提案里，并注明是原样取用还是改过。
+
+## 不在范围内
+
+- 节点管理接口和真运行时的驱动（000-6）。
+- 运行中调整容量、`pods/resize` 的写入（第四版）。
+- 按节点身份限制状态写入（第三版）。在此之前，所有节点的 agent 共用一个 ServiceAccount，能写任何池的状态，记为已知的安全缺口。
+- 替运行时管理密钥材料。提案明确不采用 sandbox-pool 的这一做法。
+
+## 开工前要回答的问题
+
+| 问题 | 来源 |
+|---|---|
+| 以 DaemonSet 运行的 agent 怎样拿到适配器在宿主机上的 socket；在 Pod Security 之下是否可行 | 提案的未决问题 OQ-9，提案要求“先核实”。本子任务在开发机上的 Kind 上给出通用做法；真运行时之下的最终形态留给 000-6 |
+| 同一个操作号下，“承载体在位”的调用晚于“不在位”的到达，靠什么挡住 | OQ-41。提案没有设计，要在实施提案里给出 |
+| 首次应用容量失败或回读不符，池停在 Pending 多久之后告警 | 提案没有规则 |
+| 占位 Pod 一直 Pending 时怎样上报 | 提案没有规则 |
+
+## 要留好的接缝
+
+编号见 [seams.md](../seams.md)。
+
+- 身份：I-23（agent 的权限只有读池、写池的状态、读池命名空间里的 Pod、读写 Lease、对池对象写事件；适配器没有 Kubernetes 凭据）、I-24（容量接口的 socket 靠文件权限和对端凭据）。
+- 可观测：O-18（池状态的单调序号）、O-21（已应用容量的取值与时间）、O-22（占位 Pod 的 UID 经容量接口交给适配器）、O-23（池的量表）、O-25（容量操作不开 span，日志带池、池类、节点、占位 Pod 的 UID、操作号）。
+
+## 验收
+
+对应第一版的 V1-2，在开发机上的 Kind 上接假运行时。
+
+- 占位 Pod 还在 Pending 时，适配器没有收到应用容量的调用，池不是 Ready。
+- 占位 Pod Running 之后，适配器收到一次应用容量的调用，回读值与目标一致，池变为 Ready。
+- 让假运行时的回读值与目标不一致：`ResourceSynced` 为 False，池不是 Ready。
+- 删除占位 Pod：适配器收到“不在位”，池立即停止准入并变为 Degraded，假运行时里已有的沙箱记录还在；新的 Pod 过了闸门之后恢复准入。
+- 重启 agent：池的状态不变，没有重复的应用容量。
+- 停掉 agent：Lease 过期后池变为 Degraded。
+- 删除一个应用过容量的池：agent 排空并确认停用之后，控制器才删占位 Pod；假运行时里还有沙箱时不放行。
+- agent 的 ServiceAccount 没有创建或删除 Pod、读 Secret、写 Node 的权限。
+
+## 参考
+
+- 容量接口的语义与缺口：内部报告 04（提案摘要） 第 1.5 节；对象归属见 2.3、2.7 节。
+- sandbox-pool 与提案的逐条对照：内部报告 02（sandbox-pool 分析） 第 4 节和第 7.1 节第 10 至 17、22 至 29 条；报告里到文件一级的清单在第 9.5 节，取舍以本文件为准。
+- 提案：`modules/placeholder-agent.md`；`04-placeholder-runtime.md` 第 5.3 节。
