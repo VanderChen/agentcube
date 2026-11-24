@@ -84,6 +84,6 @@
 
 ## 参考
 
-- 身份与授权的现状、可用的中间件和切口：内部报告 01（基线现状） 第 5、6 节。
-- 接缝的原文与出处：内部报告 04（提案摘要） 第 5、6 节。
+- 身份与授权的现状、可用的中间件和切口：内部报告 01（基线现状）第 5、6 节。
+- 接缝的原文与出处：内部报告 04（提案摘要）第 5、6 节。
 - 提案：`05-authz.md` 第 5.4 节（决策函数的草图）、`06-observability.md` 第 3、4 节（关联键、指标与 trace）、`modules/router.md`、`modules/identity-policy.md`、`modules/observability-pipeline.md`。
