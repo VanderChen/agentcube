@@ -1,12 +1,12 @@
 ---
 marp: true
 title: AgentCube Next：三种数据面形态（讨论材料）
-size: 16:9
-paginate: true
 footer: AgentCube Next · 三种数据面形态 · 讨论稿 2026-11-24 · 结论来自静态阅读，没有做实验
 ---
 
 <!--
+size: 16:9
+paginate: true
 style: |
   section { font-size: 18px; padding: 22px 40px 34px; place-content: safe start; }
   h2 { font-size: 26px; margin: 0 0 8px; }
