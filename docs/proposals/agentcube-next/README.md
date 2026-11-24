@@ -28,6 +28,7 @@ tracking-issue: ""
 | [gap-analysis.md](gap-analysis.md) | 方案 gap 的分析和计划的依据，包括为什么选 Kata |
 | [seams.md](seams.md) | 身份与可观测的接缝清单：第一版必须留好、以后不返工的 52 条要求 |
 | [subtasks/](subtasks/) | 第一版 12 个子任务各自的范围、取舍和验收 |
+| [slides.md](slides.md) | 讨论材料：整体架构、三种数据面形态（Pod；占位 Pod 加 Kata；占位 Pod 加带快照的节点栈）的部署与比较。Markdown 幻灯片，可以直接在这里读，也可以用 Marp 放映 |
 
 ## 基本信息
 

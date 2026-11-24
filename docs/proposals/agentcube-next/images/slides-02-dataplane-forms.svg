@@ -1,0 +1,168 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="620" viewBox="0 0 1200 620" font-family="-apple-system, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', 'Noto Sans CJK SC', 'Source Han Sans SC', 'WenQuanYi Micro Hei', sans-serif" role="img" aria-label="三种数据面形态的部署">
+<title>三种数据面形态的部署</title>
+<defs>
+<marker id="head" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 L10 5 L0 10 z" fill="#495057"/></marker>
+<marker id="tail" viewBox="0 0 10 10" refX="1" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M10 0 L0 5 L10 10 z" fill="#495057"/></marker>
+</defs>
+<rect width="1200" height="620" fill="#ffffff"/>
+<rect x="6" y="6" width="388" height="48" rx="6" fill="#e7f0ff" stroke="#3b6fd4" stroke-width="1.2"/>
+<text x="200.0" y="27.4" font-size="14" fill="#212529" text-anchor="middle" font-weight="bold">形态 A：Pod 形态</text>
+<text x="200.0" y="44.0" font-size="11.5" fill="#343a40" text-anchor="middle">kubernetes-sigs/agent-sandbox，即现有的 pod 后端</text>
+<rect x="6" y="60" width="388" height="94" rx="4" fill="#fafbfc" stroke="#dee2e6" stroke-width="1"/>
+<text x="16" y="76" font-size="11" fill="#5c6670" text-anchor="start" font-weight="bold">集群一侧</text>
+<rect x="16" y="82" width="368" height="28" rx="6" fill="#fff1e0" stroke="#e08a1e" stroke-width="1.2"/>
+<text x="200.0" y="100.6" font-size="12" fill="#212529" text-anchor="middle" font-weight="bold">agent-sandbox 控制器：Deployment，需另行安装</text>
+<text x="16" y="127" font-size="11.5" fill="#343a40" text-anchor="start">每沙箱：Sandbox（预热时加 SandboxClaim）→ Pod</text>
+<text x="16" y="144" font-size="11.5" fill="#343a40" text-anchor="start">预热：SandboxWarmPool 预建 Pod</text>
+<rect x="6" y="160" width="388" height="330" rx="4" fill="#fafbfc" stroke="#dee2e6" stroke-width="1"/>
+<text x="16" y="177" font-size="11.5" fill="#5c6670" text-anchor="start" font-weight="bold">节点：普通 Kubernetes 节点，不装 AgentCube 的部件</text>
+<rect x="6" y="496" width="388" height="118" rx="4" fill="#ffffff" stroke="#adb5bd" stroke-width="1"/>
+<text x="16" y="514" font-size="12" fill="#212529" text-anchor="start" font-weight="bold">部署要点</text>
+<text x="16" y="535" font-size="11.5" fill="#343a40" text-anchor="start">• 节点上不新增部件，控制器装在集群里</text>
+<text x="16" y="555" font-size="11.5" fill="#343a40" text-anchor="start">• 每个沙箱 = 一个 Sandbox 对象 + 一个 Pod</text>
+<text x="16" y="575" font-size="11.5" fill="#343a40" text-anchor="start">• 要 microVM 隔离：节点装 Kata，用 RuntimeClass 选</text>
+<text x="16" y="595" font-size="11.5" fill="#343a40" text-anchor="start">• 预热 = 预先建好的 Pod，占着真实的 requests</text>
+<rect x="16" y="188" width="70" height="30" rx="6" fill="#f1f3f5" stroke="#868e96" stroke-width="1.2"/>
+<text x="51.0" y="207.4" font-size="11.5" fill="#212529" text-anchor="middle" font-weight="bold">kubelet</text>
+<rect x="100" y="188" width="132" height="30" rx="6" fill="#f1f3f5" stroke="#868e96" stroke-width="1.2"/>
+<text x="166.0" y="207.4" font-size="11.5" fill="#212529" text-anchor="middle" font-weight="bold">containerd（CRI）</text>
+<rect x="246" y="188" width="138" height="30" rx="6" fill="#fff1e0" stroke="#e08a1e" stroke-width="1.2"/>
+<text x="315.0" y="207.4" font-size="11.5" fill="#212529" text-anchor="middle" font-weight="bold">runc / gVisor / Kata</text>
+<path d="M86 203 L100 203" fill="none" stroke="#495057" stroke-width="1.4" marker-end="url(#head)"/>
+<path d="M232 203 L246 203" fill="none" stroke="#495057" stroke-width="1.4" marker-end="url(#head)"/>
+<rect x="16" y="236" width="114" height="150" rx="6" fill="#f3ebff" stroke="#7b55c7" stroke-width="1.2"/>
+<text x="73" y="255" font-size="12" fill="#212529" text-anchor="middle" font-weight="bold">沙箱 Pod</text>
+<rect x="26" y="264" width="94" height="24" rx="6" fill="#f1f3f5" stroke="#868e96" stroke-width="1.2"/>
+<text x="73.0" y="280.2" font-size="11" fill="#343a40" text-anchor="middle">pause</text>
+<rect x="26" y="294" width="94" height="46" rx="6" fill="#ffffff" stroke="#adb5bd" stroke-width="1.2"/>
+<text x="73.0" y="314.3" font-size="11" fill="#343a40" text-anchor="middle">业务容器</text>
+<text x="73.0" y="328.4" font-size="10" fill="#5c6670" text-anchor="middle">PicoD 或 agent</text>
+<text x="73" y="358" font-size="10.5" fill="#343a40" text-anchor="middle">Pod IP（CNI）</text>
+<text x="73" y="374" font-size="10.5" fill="#343a40" text-anchor="middle">自己的 cgroup</text>
+<path d="M73 218 L73 236" fill="none" stroke="#495057" stroke-width="1.4" marker-end="url(#head)"/>
+<rect x="143" y="236" width="114" height="150" rx="6" fill="#f3ebff" stroke="#7b55c7" stroke-width="1.2"/>
+<text x="200" y="255" font-size="12" fill="#212529" text-anchor="middle" font-weight="bold">沙箱 Pod</text>
+<rect x="153" y="264" width="94" height="24" rx="6" fill="#f1f3f5" stroke="#868e96" stroke-width="1.2"/>
+<text x="200.0" y="280.2" font-size="11" fill="#343a40" text-anchor="middle">pause</text>
+<rect x="153" y="294" width="94" height="46" rx="6" fill="#ffffff" stroke="#adb5bd" stroke-width="1.2"/>
+<text x="200.0" y="314.3" font-size="11" fill="#343a40" text-anchor="middle">业务容器</text>
+<text x="200.0" y="328.4" font-size="10" fill="#5c6670" text-anchor="middle">PicoD 或 agent</text>
+<text x="200" y="358" font-size="10.5" fill="#343a40" text-anchor="middle">Pod IP（CNI）</text>
+<text x="200" y="374" font-size="10.5" fill="#343a40" text-anchor="middle">自己的 cgroup</text>
+<path d="M200 218 L200 236" fill="none" stroke="#495057" stroke-width="1.4" marker-end="url(#head)"/>
+<rect x="270" y="236" width="114" height="150" rx="6" fill="#f3ebff" stroke="#7b55c7" stroke-width="1.2" stroke-dasharray="5 4"/>
+<text x="327" y="255" font-size="12" fill="#212529" text-anchor="middle" font-weight="bold">预热 Pod</text>
+<rect x="280" y="264" width="94" height="24" rx="6" fill="#f1f3f5" stroke="#868e96" stroke-width="1.2"/>
+<text x="327.0" y="280.2" font-size="11" fill="#343a40" text-anchor="middle">pause</text>
+<rect x="280" y="294" width="94" height="46" rx="6" fill="#ffffff" stroke="#adb5bd" stroke-width="1.2"/>
+<text x="327.0" y="314.3" font-size="11" fill="#343a40" text-anchor="middle">待认领</text>
+<text x="327.0" y="328.4" font-size="10" fill="#5c6670" text-anchor="middle">PicoD</text>
+<text x="327" y="358" font-size="10.5" fill="#343a40" text-anchor="middle">Pod IP（CNI）</text>
+<text x="327" y="374" font-size="10.5" fill="#343a40" text-anchor="middle">自己的 cgroup</text>
+<path d="M327 218 L327 236" fill="none" stroke="#495057" stroke-width="1.4" marker-end="url(#head)"/>
+<text x="200" y="414" font-size="11.5" fill="#343a40" text-anchor="middle">每个 Pod 由 kube-scheduler 放置、kubelet 拉起</text>
+<text x="200" y="434" font-size="11.5" fill="#343a40" text-anchor="middle">隔离强度取决于 RuntimeClass</text>
+<text x="200" y="484" font-size="11.5" fill="#212529" text-anchor="middle" font-weight="bold">访问：Router → PodIP:端口</text>
+<rect x="406" y="6" width="388" height="48" rx="6" fill="#e6f6ec" stroke="#2f9e55" stroke-width="1.2"/>
+<text x="600.0" y="27.4" font-size="14" fill="#212529" text-anchor="middle" font-weight="bold">形态 B：占位 Pod + Kata（或开源 Kuasar）</text>
+<text x="600.0" y="44.0" font-size="11.5" fill="#343a40" text-anchor="middle">经 containerd 直接起 microVM，没有快照管理；计划的第一版</text>
+<rect x="406" y="60" width="388" height="94" rx="4" fill="#fafbfc" stroke="#dee2e6" stroke-width="1"/>
+<text x="416" y="76" font-size="11" fill="#5c6670" text-anchor="start" font-weight="bold">集群一侧</text>
+<rect x="416" y="82" width="368" height="28" rx="6" fill="#e6f6ec" stroke="#2f9e55" stroke-width="1.2"/>
+<text x="600.0" y="100.6" font-size="12" fill="#212529" text-anchor="middle" font-weight="bold">池控制器：独立的 Deployment（新增，建议）</text>
+<text x="416" y="127" font-size="11.5" fill="#343a40" text-anchor="start">SandboxPoolClass → 每节点一个 SandboxPool + 占位 Pod</text>
+<text x="416" y="144" font-size="11.5" fill="#343a40" text-anchor="start">每沙箱：没有 Kubernetes 对象</text>
+<rect x="406" y="160" width="388" height="330" rx="4" fill="#fafbfc" stroke="#dee2e6" stroke-width="1"/>
+<text x="416" y="177" font-size="11.5" fill="#5c6670" text-anchor="start" font-weight="bold">节点：Kubernetes 节点，要 /dev/kvm</text>
+<rect x="406" y="496" width="388" height="118" rx="4" fill="#ffffff" stroke="#adb5bd" stroke-width="1"/>
+<text x="416" y="514" font-size="12" fill="#212529" text-anchor="start" font-weight="bold">部署要点</text>
+<text x="416" y="535" font-size="11.5" fill="#343a40" text-anchor="start">• 节点新增：placeholder-agent、节点适配器、Kata 和 VMM</text>
+<text x="416" y="555" font-size="11.5" fill="#343a40" text-anchor="start">• 沙箱不是 Pod；按设计不在占位 Pod 的 cgroup 下</text>
+<text x="416" y="575" font-size="11.5" fill="#343a40" text-anchor="start">• 沙箱内容就是 OCI 镜像；每次创建都是冷启动</text>
+<text x="416" y="595" font-size="11.5" fill="#343a40" text-anchor="start">• 账本、准入、开销、网络都由节点适配器负责</text>
+<rect x="416" y="186" width="176" height="58" rx="6" fill="#f1f3f5" stroke="#868e96" stroke-width="1.2"/>
+<text x="504.0" y="204.4" font-size="12" fill="#212529" text-anchor="middle" font-weight="bold">占位 Pod（每节点一个）</text>
+<text x="504.0" y="219.9" font-size="11" fill="#343a40" text-anchor="middle">pause 或空操作 shim</text>
+<text x="504.0" y="235.1" font-size="11" fill="#343a40" text-anchor="middle">requests = 池大小，只记账</text>
+<rect x="602" y="186" width="182" height="58" rx="6" fill="#e6f6ec" stroke="#2f9e55" stroke-width="1.2"/>
+<text x="693.0" y="204.4" font-size="12" fill="#212529" text-anchor="middle" font-weight="bold">placeholder-agent</text>
+<text x="693.0" y="219.9" font-size="11" fill="#343a40" text-anchor="middle">DaemonSet（建议）</text>
+<text x="693.0" y="235.1" font-size="11" fill="#343a40" text-anchor="middle">读占位 Pod，写池状态与 /resize</text>
+<path d="M693 244 L693 264" fill="none" stroke="#495057" stroke-width="1.4" marker-end="url(#head)"/>
+<text x="685" y="258" font-size="10" fill="#5c6670" text-anchor="end">容量接口（本地 socket）</text>
+<rect x="416" y="264" width="368" height="64" rx="6" fill="#e6f6ec" stroke="#2f9e55" stroke-width="1.2"/>
+<text x="600.0" y="285.4" font-size="12" fill="#212529" text-anchor="middle" font-weight="bold">节点适配器：宿主机服务或特权 DaemonSet，待定</text>
+<text x="600.0" y="300.9" font-size="11" fill="#343a40" text-anchor="middle">池的账本 · 准入 · 每沙箱 cgroup · 网络命名空间</text>
+<text x="600.0" y="316.1" font-size="11" fill="#5c6670" text-anchor="middle">WorkloadManager 经 gRPC + mTLS 直接调用</text>
+<path d="M600 328 L600 338" fill="none" stroke="#495057" stroke-width="1.4" marker-end="url(#head)"/>
+<rect x="416" y="338" width="368" height="42" rx="6" fill="#f1f3f5" stroke="#868e96" stroke-width="1.2"/>
+<text x="600.0" y="356.1" font-size="11.5" fill="#343a40" text-anchor="middle">containerd：独立 namespace，kubelet 不管这些沙箱</text>
+<text x="600.0" y="370.9" font-size="10.5" fill="#5c6670" text-anchor="middle">用 kubelet 的实例还是专用实例待定；互不干扰待验证</text>
+<path d="M600 380 L600 390" fill="none" stroke="#495057" stroke-width="1.4" marker-end="url(#head)"/>
+<rect x="416" y="390" width="368" height="80" rx="6" fill="#ffffff" stroke="#adb5bd" stroke-width="1.2" stroke-dasharray="5 4"/>
+<text x="424" y="405" font-size="10.5" fill="#5c6670" text-anchor="start">池的父 cgroup：上限 = 池大小（建议，待验证）</text>
+<rect x="424" y="412" width="112" height="50" rx="6" fill="#f3ebff" stroke="#7b55c7" stroke-width="1.2"/>
+<text x="480.0" y="434.3" font-size="12" fill="#212529" text-anchor="middle" font-weight="bold">microVM</text>
+<text x="480.0" y="449.3" font-size="10.5" fill="#343a40" text-anchor="middle">Kata shim + VMM</text>
+<rect x="544" y="412" width="112" height="50" rx="6" fill="#f3ebff" stroke="#7b55c7" stroke-width="1.2"/>
+<text x="600.0" y="434.3" font-size="12" fill="#212529" text-anchor="middle" font-weight="bold">microVM</text>
+<text x="600.0" y="449.3" font-size="10.5" fill="#343a40" text-anchor="middle">Kata shim + VMM</text>
+<rect x="664" y="412" width="112" height="50" rx="6" fill="#f3ebff" stroke="#7b55c7" stroke-width="1.2"/>
+<text x="720.0" y="434.3" font-size="12" fill="#212529" text-anchor="middle" font-weight="bold">microVM</text>
+<text x="720.0" y="449.3" font-size="10.5" fill="#343a40" text-anchor="middle">Kata shim + VMM</text>
+<text x="600" y="484" font-size="11.5" fill="#212529" text-anchor="middle" font-weight="bold">访问：第一版只在节点上可达，第二版自建数据入口</text>
+<rect x="806" y="6" width="388" height="48" rx="6" fill="#fff1e0" stroke="#e08a1e" stroke-width="1.2"/>
+<text x="1000.0" y="27.4" font-size="14" fill="#212529" text-anchor="middle" font-weight="bold">形态 C：占位 Pod + kuasar-sandbox / CubeSandbox</text>
+<text x="1000.0" y="44.0" font-size="11.5" fill="#343a40" text-anchor="middle">带模板快照和暂停恢复的节点栈；第二种运行时的候选</text>
+<rect x="806" y="60" width="388" height="94" rx="4" fill="#fafbfc" stroke="#dee2e6" stroke-width="1"/>
+<text x="816" y="76" font-size="11" fill="#5c6670" text-anchor="start" font-weight="bold">集群一侧</text>
+<rect x="816" y="82" width="368" height="28" rx="6" fill="#e6f6ec" stroke="#2f9e55" stroke-width="1.2"/>
+<text x="1000.0" y="100.6" font-size="12" fill="#212529" text-anchor="middle" font-weight="bold">池控制器：独立的 Deployment（同形态 B）</text>
+<text x="816" y="127" font-size="11.5" fill="#343a40" text-anchor="start">池对象与占位 Pod 同形态 B；每沙箱没有 Kubernetes 对象</text>
+<text x="816" y="144" font-size="11.5" fill="#343a40" text-anchor="start">不用运行时自带的集群控制面</text>
+<rect x="806" y="160" width="388" height="330" rx="4" fill="#fafbfc" stroke="#dee2e6" stroke-width="1"/>
+<text x="816" y="177" font-size="11.5" fill="#5c6670" text-anchor="start" font-weight="bold">节点：Kubernetes 节点，要 /dev/kvm</text>
+<rect x="806" y="496" width="388" height="118" rx="4" fill="#ffffff" stroke="#adb5bd" stroke-width="1"/>
+<text x="816" y="514" font-size="12" fill="#212529" text-anchor="start" font-weight="bold">部署要点</text>
+<text x="816" y="535" font-size="11.5" fill="#343a40" text-anchor="start">• 节点新增：placeholder-agent、节点适配器、整套节点栈</text>
+<text x="816" y="555" font-size="11.5" fill="#343a40" text-anchor="start">• kuasar-sandbox：账本、快照、网络、数据入口都在节点上</text>
+<text x="816" y="575" font-size="11.5" fill="#343a40" text-anchor="start">• CubeSandbox：准入、入口、模板构建在集群层，要另补</text>
+<text x="816" y="595" font-size="11.5" fill="#343a40" text-anchor="start">• 与 Kubernetes 节点共存的形态还没有验证</text>
+<rect x="816" y="186" width="176" height="58" rx="6" fill="#f1f3f5" stroke="#868e96" stroke-width="1.2"/>
+<text x="904.0" y="204.4" font-size="12" fill="#212529" text-anchor="middle" font-weight="bold">占位 Pod（每节点一个）</text>
+<text x="904.0" y="219.9" font-size="11" fill="#343a40" text-anchor="middle">pause 或空操作 shim</text>
+<text x="904.0" y="235.1" font-size="11" fill="#343a40" text-anchor="middle">requests = 池大小，只记账</text>
+<rect x="1002" y="186" width="182" height="58" rx="6" fill="#e6f6ec" stroke="#2f9e55" stroke-width="1.2"/>
+<text x="1093.0" y="204.4" font-size="12" fill="#212529" text-anchor="middle" font-weight="bold">placeholder-agent</text>
+<text x="1093.0" y="219.9" font-size="11" fill="#343a40" text-anchor="middle">DaemonSet（建议）</text>
+<text x="1093.0" y="235.1" font-size="11" fill="#343a40" text-anchor="middle">读占位 Pod，写池状态与 /resize</text>
+<path d="M1093 244 L1093 264" fill="none" stroke="#495057" stroke-width="1.4" marker-end="url(#head)"/>
+<text x="1085" y="258" font-size="10" fill="#5c6670" text-anchor="end">容量接口（本地 socket）</text>
+<rect x="816" y="264" width="368" height="40" rx="6" fill="#e6f6ec" stroke="#2f9e55" stroke-width="1.2"/>
+<text x="1000.0" y="281.0" font-size="12" fill="#212529" text-anchor="middle" font-weight="bold">节点适配器</text>
+<text x="1000.0" y="296.5" font-size="11" fill="#343a40" text-anchor="middle">只翻译接口；账本与准入要由节点栈做</text>
+<path d="M1000 304 L1000 314" fill="none" stroke="#495057" stroke-width="1.4" marker-end="url(#head)"/>
+<rect x="816" y="314" width="368" height="122" rx="6" fill="#fff1e0" stroke="#e08a1e" stroke-width="1.2"/>
+<text x="824" y="330" font-size="11.5" fill="#212529" text-anchor="start" font-weight="bold">运行时节点栈：宿主机服务，二选一</text>
+<rect x="824" y="337" width="172" height="92" rx="6" fill="#ffffff" stroke="#adb5bd" stroke-width="1.2"/>
+<text x="910.0" y="358.4" font-size="11.5" fill="#212529" text-anchor="middle" font-weight="bold">kuasar-sandbox</text>
+<text x="910.0" y="373.2" font-size="10.5" fill="#343a40" text-anchor="middle">conductor（账本、准入）</text>
+<text x="910.0" y="387.7" font-size="10.5" fill="#343a40" text-anchor="middle">Proxy（数据入口）· connector</text>
+<text x="910.0" y="402.2" font-size="10.5" fill="#343a40" text-anchor="middle">每沙箱 sandbox-ctl + CH</text>
+<text x="910.0" y="416.7" font-size="10.5" fill="#343a40" text-anchor="middle">模板构建也在节点上</text>
+<rect x="1004" y="337" width="172" height="92" rx="6" fill="#ffffff" stroke="#adb5bd" stroke-width="1.2"/>
+<text x="1090.0" y="358.4" font-size="11.5" fill="#212529" text-anchor="middle" font-weight="bold">CubeSandbox</text>
+<text x="1090.0" y="373.2" font-size="10.5" fill="#343a40" text-anchor="middle">Cubelet（内嵌 containerd）</text>
+<text x="1090.0" y="387.7" font-size="10.5" fill="#343a40" text-anchor="middle">CubeVS · CubeEgress（网络）</text>
+<text x="1090.0" y="402.2" font-size="10.5" fill="#343a40" text-anchor="middle">每沙箱 CubeShim + VMM</text>
+<text x="1090.0" y="416.7" font-size="10.5" fill="#b3541e" text-anchor="middle">准入、入口、模板构建在集群层</text>
+<path d="M1000 436 L1000 444" fill="none" stroke="#495057" stroke-width="1.4" marker-end="url(#head)"/>
+<rect x="824" y="444" width="76" height="24" rx="6" fill="#f3ebff" stroke="#7b55c7" stroke-width="1.2"/>
+<text x="862.0" y="460.4" font-size="11.5" fill="#212529" text-anchor="middle" font-weight="bold">microVM</text>
+<rect x="908" y="444" width="76" height="24" rx="6" fill="#f3ebff" stroke="#7b55c7" stroke-width="1.2"/>
+<text x="946.0" y="460.4" font-size="11.5" fill="#212529" text-anchor="middle" font-weight="bold">microVM</text>
+<rect x="992" y="444" width="76" height="24" rx="6" fill="#f3ebff" stroke="#7b55c7" stroke-width="1.2"/>
+<text x="1030.0" y="460.4" font-size="11.5" fill="#212529" text-anchor="middle" font-weight="bold">microVM</text>
+<text x="1080" y="460" font-size="11" fill="#5c6670" text-anchor="start">可从快照恢复</text>
+<text x="1000" y="484" font-size="11.5" fill="#212529" text-anchor="middle" font-weight="bold">访问：Router → 节点数据入口，kuasar-sandbox 自带</text>
+</svg>

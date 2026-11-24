@@ -1,0 +1,147 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="620" viewBox="0 0 1200 620" font-family="-apple-system, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', 'Noto Sans CJK SC', 'Source Han Sans SC', 'WenQuanYi Micro Hei', sans-serif" role="img" aria-label="AgentCube Next 整体架构：控制面共用，数据面在后端接口处分叉">
+<title>AgentCube Next 整体架构：控制面共用，数据面在后端接口处分叉</title>
+<defs>
+<marker id="head" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 L10 5 L0 10 z" fill="#495057"/></marker>
+<marker id="tail" viewBox="0 0 10 10" refX="1" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M10 0 L0 5 L10 10 z" fill="#495057"/></marker>
+</defs>
+<rect width="1200" height="620" fill="#ffffff"/>
+<rect x="6" y="6" width="1000" height="50" rx="4" fill="#fafbfc" stroke="#dee2e6" stroke-width="1"/>
+<text x="49" y="36.0" font-size="13" fill="#5c6670" text-anchor="middle" font-weight="bold">客户端</text>
+<rect x="6" y="62" width="1000" height="62" rx="4" fill="#fafbfc" stroke="#dee2e6" stroke-width="1"/>
+<text x="49" y="98.0" font-size="13" fill="#5c6670" text-anchor="middle" font-weight="bold">接入</text>
+<rect x="6" y="130" width="1000" height="128" rx="4" fill="#fafbfc" stroke="#dee2e6" stroke-width="1"/>
+<text x="49" y="199.0" font-size="13" fill="#5c6670" text-anchor="middle" font-weight="bold">会话与调度</text>
+<rect x="6" y="264" width="1000" height="104" rx="4" fill="#fafbfc" stroke="#dee2e6" stroke-width="1"/>
+<text x="49" y="312.5" font-size="13" fill="#5c6670" text-anchor="middle" font-weight="bold">容量</text>
+<text x="49" y="329.5" font-size="10.5" fill="#5c6670" text-anchor="middle">Kubernetes</text>
+<rect x="6" y="374" width="1000" height="240" rx="4" fill="#fafbfc" stroke="#dee2e6" stroke-width="1"/>
+<text x="49" y="490.5" font-size="13" fill="#5c6670" text-anchor="middle" font-weight="bold">节点</text>
+<text x="49" y="507.5" font-size="10.5" fill="#5c6670" text-anchor="middle">数据面</text>
+<rect x="140" y="13" width="260" height="36" rx="6" fill="#ffffff" stroke="#adb5bd" stroke-width="1.2"/>
+<text x="270.0" y="35.9" font-size="13" fill="#212529" text-anchor="middle" font-weight="bold">AgentCube SDK / CLI</text>
+<rect x="420" y="13" width="200" height="36" rx="6" fill="#ffffff" stroke="#adb5bd" stroke-width="1.2" stroke-dasharray="5 4"/>
+<text x="520.0" y="35.9" font-size="13" fill="#212529" text-anchor="middle" font-weight="bold">E2B SDK（第二版起）</text>
+<rect x="636" y="24" width="14" height="14" rx="3" fill="#e7f0ff" stroke="#3b6fd4" stroke-width="1.2"/>
+<text x="655" y="35.5" font-size="11.5" fill="#5c6670" text-anchor="start">现有，保留或扩展</text>
+<rect x="763.0" y="24" width="14" height="14" rx="3" fill="#e6f6ec" stroke="#2f9e55" stroke-width="1.2"/>
+<text x="782.0" y="35.5" font-size="11.5" fill="#5c6670" text-anchor="start">新增</text>
+<rect x="821.0" y="24" width="14" height="14" rx="3" fill="#fff1e0" stroke="#e08a1e" stroke-width="1.2"/>
+<text x="840.0" y="35.5" font-size="11.5" fill="#5c6670" text-anchor="start">第三方</text>
+<rect x="890.5" y="24" width="14" height="14" rx="3" fill="#f1f3f5" stroke="#868e96" stroke-width="1.2"/>
+<text x="909.5" y="35.5" font-size="11.5" fill="#5c6670" text-anchor="start">Kubernetes</text>
+<rect x="300" y="69" width="480" height="48" rx="6" fill="#e7f0ff" stroke="#3b6fd4" stroke-width="1.2"/>
+<text x="540.0" y="90.0" font-size="13" fill="#212529" text-anchor="middle" font-weight="bold">Router</text>
+<text x="540.0" y="106.3" font-size="11.5" fill="#343a40" text-anchor="middle">认证 · 会话路由 · 把请求转发到沙箱入口</text>
+<rect x="820" y="69" width="178" height="182" rx="6" fill="#e7f0ff" stroke="#3b6fd4" stroke-width="1.2"/>
+<text x="909.0" y="149.1" font-size="13" fill="#212529" text-anchor="middle" font-weight="bold">会话存储</text>
+<text x="909.0" y="165.4" font-size="11.5" fill="#343a40" text-anchor="middle">Redis / Valkey</text>
+<text x="909.0" y="181.3" font-size="11.5" fill="#343a40" text-anchor="middle">会话记录 · 入口地址</text>
+<path d="M350 49 L350 69" fill="none" stroke="#495057" stroke-width="1.4" marker-end="url(#head)"/>
+<path d="M520 49 L520 69" fill="none" stroke="#495057" stroke-width="1.4" stroke-dasharray="5 4" marker-end="url(#head)"/>
+<path d="M200 49 L200 137" fill="none" stroke="#495057" stroke-width="1.4" marker-end="url(#head)"/>
+<text x="207" y="82" font-size="11" fill="#5c6670" text-anchor="start">创建、删除会话</text>
+<text x="207" y="97" font-size="11" fill="#5c6670" text-anchor="start">（原生接口）</text>
+<path d="M780 93 L820 93" fill="none" stroke="#495057" stroke-width="1.4" marker-end="url(#head)" marker-start="url(#tail)"/>
+<rect x="140" y="137" width="640" height="114" rx="6" fill="#e7f0ff" stroke="#3b6fd4" stroke-width="1.2"/>
+<text x="152" y="156" font-size="13" fill="#212529" text-anchor="start" font-weight="bold">WorkloadManager</text>
+<text x="282" y="156" font-size="11.5" fill="#343a40" text-anchor="start">会话生命周期 · 模板 · 垃圾回收</text>
+<text x="152" y="174" font-size="11" fill="#5c6670" text-anchor="start">后端接口</text>
+<rect x="152" y="180" width="296" height="62" rx="6" fill="#e7f0ff" stroke="#3b6fd4" stroke-width="1.2"/>
+<text x="300.0" y="208.0" font-size="13" fill="#212529" text-anchor="middle" font-weight="bold">pod 后端（现有逻辑，保留）</text>
+<text x="300.0" y="224.3" font-size="11.5" fill="#343a40" text-anchor="middle">写 agent-sandbox 对象，等 Pod 就绪</text>
+<rect x="464" y="180" width="304" height="62" rx="6" fill="#e6f6ec" stroke="#2f9e55" stroke-width="1.2"/>
+<text x="616.0" y="208.0" font-size="13" fill="#212529" text-anchor="middle" font-weight="bold">pool 后端 + 沙箱调度器（新增）</text>
+<text x="616.0" y="224.3" font-size="11.5" fill="#343a40" text-anchor="middle">选池，直接调节点适配器</text>
+<path d="M450 117 L450 137" fill="none" stroke="#495057" stroke-width="1.4" marker-end="url(#head)"/>
+<path d="M780 200 L820 200" fill="none" stroke="#495057" stroke-width="1.4" marker-end="url(#head)" marker-start="url(#tail)"/>
+<rect x="140" y="271" width="858" height="90" rx="6" fill="#f1f3f5" stroke="#868e96" stroke-width="1.2"/>
+<text x="152" y="289" font-size="13" fill="#212529" text-anchor="start" font-weight="bold">Kubernetes（本身不改）</text>
+<rect x="152" y="300" width="296" height="52" rx="6" fill="#fff1e0" stroke="#e08a1e" stroke-width="1.2"/>
+<text x="300.0" y="323.0" font-size="13" fill="#212529" text-anchor="middle" font-weight="bold">agent-sandbox 控制器（第三方）</text>
+<text x="300.0" y="339.3" font-size="11.5" fill="#343a40" text-anchor="middle">Sandbox → Pod；SandboxWarmPool 预热</text>
+<rect x="464" y="300" width="230" height="52" rx="6" fill="#e6f6ec" stroke="#2f9e55" stroke-width="1.2"/>
+<text x="579.0" y="323.0" font-size="13" fill="#212529" text-anchor="middle" font-weight="bold">池控制器（新增）</text>
+<text x="579.0" y="339.3" font-size="11.5" fill="#343a40" text-anchor="middle">池类 → 每节点一个池 → 占位 Pod</text>
+<path d="M380 242 L380 300" fill="none" stroke="#495057" stroke-width="1.4" marker-end="url(#head)"/>
+<text x="745" y="318" font-size="11.5" fill="#343a40" text-anchor="start">gRPC + mTLS</text>
+<text x="745" y="335" font-size="11.5" fill="#343a40" text-anchor="start">不经 Kubernetes API</text>
+<rect x="140" y="381" width="308" height="226" rx="6" fill="#ffffff" stroke="#adb5bd" stroke-width="1.2"/>
+<text x="152" y="400" font-size="13" fill="#212529" text-anchor="start" font-weight="bold">形态 A：每个沙箱一个 Pod</text>
+<rect x="152" y="410" width="284" height="30" rx="6" fill="#f1f3f5" stroke="#868e96" stroke-width="1.2"/>
+<text x="294.0" y="429.4" font-size="11.5" fill="#343a40" text-anchor="middle">kubelet → containerd → runc / gVisor / Kata</text>
+<rect x="152" y="452" width="86" height="84" rx="6" fill="#f3ebff" stroke="#7b55c7" stroke-width="1.2"/>
+<text x="195.0" y="483.4" font-size="12" fill="#212529" text-anchor="middle" font-weight="bold">沙箱 Pod</text>
+<text x="195.0" y="498.9" font-size="11" fill="#343a40" text-anchor="middle">业务容器</text>
+<text x="195.0" y="514.1" font-size="11" fill="#343a40" text-anchor="middle">Pod IP</text>
+<rect x="251" y="452" width="86" height="84" rx="6" fill="#f3ebff" stroke="#7b55c7" stroke-width="1.2"/>
+<text x="294.0" y="483.4" font-size="12" fill="#212529" text-anchor="middle" font-weight="bold">沙箱 Pod</text>
+<text x="294.0" y="498.9" font-size="11" fill="#343a40" text-anchor="middle">业务容器</text>
+<text x="294.0" y="514.1" font-size="11" fill="#343a40" text-anchor="middle">Pod IP</text>
+<rect x="350" y="452" width="86" height="84" rx="6" fill="#f3ebff" stroke="#7b55c7" stroke-width="1.2" stroke-dasharray="5 4"/>
+<text x="393.0" y="483.4" font-size="12" fill="#212529" text-anchor="middle" font-weight="bold">预热 Pod</text>
+<text x="393.0" y="498.9" font-size="11" fill="#343a40" text-anchor="middle">待认领</text>
+<text x="393.0" y="514.1" font-size="11" fill="#343a40" text-anchor="middle">Pod IP</text>
+<text x="294" y="562" font-size="11.5" fill="#343a40" text-anchor="middle">kube-scheduler 放置，kubelet 拉起</text>
+<text x="294" y="582" font-size="11.5" fill="#343a40" text-anchor="middle">沙箱入口：PodIP:端口</text>
+<path d="M380 352 L380 381" fill="none" stroke="#495057" stroke-width="1.4" marker-end="url(#head)"/>
+<rect x="464" y="381" width="534" height="226" rx="6" fill="#ffffff" stroke="#adb5bd" stroke-width="1.2"/>
+<text x="986" y="400" font-size="13" fill="#212529" text-anchor="end" font-weight="bold">池路径：沙箱不是 Pod</text>
+<rect x="476" y="410" width="144" height="44" rx="6" fill="#f1f3f5" stroke="#868e96" stroke-width="1.2"/>
+<text x="548.0" y="429.0" font-size="12" fill="#212529" text-anchor="middle" font-weight="bold">占位 Pod</text>
+<text x="548.0" y="444.5" font-size="11" fill="#343a40" text-anchor="middle">只记账，每节点一个</text>
+<rect x="634" y="410" width="202" height="44" rx="6" fill="#e6f6ec" stroke="#2f9e55" stroke-width="1.2"/>
+<text x="735.0" y="429.0" font-size="12" fill="#212529" text-anchor="middle" font-weight="bold">节点适配器（新增）</text>
+<text x="735.0" y="444.5" font-size="11" fill="#343a40" text-anchor="middle">沙箱的创建、查询、删除</text>
+<rect x="850" y="410" width="136" height="44" rx="6" fill="#e6f6ec" stroke="#2f9e55" stroke-width="1.2"/>
+<text x="918.0" y="429.0" font-size="12" fill="#212529" text-anchor="middle" font-weight="bold">placeholder-agent</text>
+<text x="918.0" y="444.5" font-size="11" fill="#343a40" text-anchor="middle">容量交接 · resize</text>
+<path d="M548 352 L548 410" fill="none" stroke="#495057" stroke-width="1.4" marker-end="url(#head)"/>
+<path d="M735 242 L735 410" fill="none" stroke="#495057" stroke-width="1.4" marker-end="url(#head)"/>
+<path d="M850 432 L836 432" fill="none" stroke="#495057" stroke-width="1.4" marker-end="url(#head)"/>
+<rect x="476" y="474" width="250" height="108" rx="6" fill="#fff1e0" stroke="#e08a1e" stroke-width="1.2"/>
+<text x="601" y="492" font-size="12" fill="#212529" text-anchor="middle" font-weight="bold">形态 B：containerd + Kata</text>
+<text x="601" y="509" font-size="11.5" fill="#343a40" text-anchor="middle">账本与准入在节点适配器</text>
+<rect x="488" y="520" width="70" height="52" rx="6" fill="#f3ebff" stroke="#7b55c7" stroke-width="1.2"/>
+<text x="523.0" y="543.1" font-size="11.5" fill="#212529" text-anchor="middle" font-weight="bold">microVM</text>
+<text x="523.0" y="557.9" font-size="10.5" fill="#343a40" text-anchor="middle">沙箱</text>
+<rect x="566" y="520" width="70" height="52" rx="6" fill="#f3ebff" stroke="#7b55c7" stroke-width="1.2"/>
+<text x="601.0" y="543.1" font-size="11.5" fill="#212529" text-anchor="middle" font-weight="bold">microVM</text>
+<text x="601.0" y="557.9" font-size="10.5" fill="#343a40" text-anchor="middle">沙箱</text>
+<rect x="644" y="520" width="70" height="52" rx="6" fill="#f3ebff" stroke="#7b55c7" stroke-width="1.2"/>
+<text x="679.0" y="543.1" font-size="11.5" fill="#212529" text-anchor="middle" font-weight="bold">microVM</text>
+<text x="679.0" y="557.9" font-size="10.5" fill="#343a40" text-anchor="middle">沙箱</text>
+<rect x="736" y="474" width="250" height="108" rx="6" fill="#fff1e0" stroke="#e08a1e" stroke-width="1.2"/>
+<text x="861" y="492" font-size="12" fill="#212529" text-anchor="middle" font-weight="bold">形态 C：带快照的节点栈</text>
+<text x="861" y="509" font-size="11.5" fill="#343a40" text-anchor="middle">kuasar-sandbox / CubeSandbox</text>
+<rect x="748" y="520" width="70" height="52" rx="6" fill="#f3ebff" stroke="#7b55c7" stroke-width="1.2"/>
+<text x="783.0" y="543.1" font-size="11.5" fill="#212529" text-anchor="middle" font-weight="bold">microVM</text>
+<text x="783.0" y="557.9" font-size="10.5" fill="#343a40" text-anchor="middle">沙箱</text>
+<rect x="826" y="520" width="70" height="52" rx="6" fill="#f3ebff" stroke="#7b55c7" stroke-width="1.2"/>
+<text x="861.0" y="543.1" font-size="11.5" fill="#212529" text-anchor="middle" font-weight="bold">microVM</text>
+<text x="861.0" y="557.9" font-size="10.5" fill="#343a40" text-anchor="middle">沙箱</text>
+<rect x="904" y="520" width="70" height="52" rx="6" fill="#f3ebff" stroke="#7b55c7" stroke-width="1.2"/>
+<text x="939.0" y="543.1" font-size="11.5" fill="#212529" text-anchor="middle" font-weight="bold">microVM</text>
+<text x="939.0" y="557.9" font-size="10.5" fill="#343a40" text-anchor="middle">沙箱</text>
+<path d="M680 454 L680 474" fill="none" stroke="#495057" stroke-width="1.4" marker-end="url(#head)"/>
+<path d="M790 454 L790 474" fill="none" stroke="#495057" stroke-width="1.4" marker-end="url(#head)"/>
+<text x="731" y="599" font-size="11" fill="#5c6670" text-anchor="middle">池路径的数据路径：第一版没有，第二版起经节点数据入口</text>
+<path d="M300 109 L120 109 L120 494 L140 494" fill="none" stroke="#495057" stroke-width="1.4" stroke-dasharray="5 4" marker-end="url(#head)"/>
+<text x="112" y="310" font-size="11" fill="#5c6670" text-anchor="middle" transform="rotate(-90 112 310)">数据路径：Router 到沙箱入口</text>
+<rect x="1016" y="62" width="178" height="552" rx="4" fill="#fafbfc" stroke="#dee2e6" stroke-width="1"/>
+<text x="1105" y="84" font-size="13" fill="#5c6670" text-anchor="middle" font-weight="bold">横切</text>
+<text x="1105" y="102" font-size="11" fill="#5c6670" text-anchor="middle">第一版只留接缝</text>
+<rect x="1028" y="116" width="154" height="150" rx="6" fill="#ffffff" stroke="#adb5bd" stroke-width="1.2"/>
+<text x="1105.0" y="172.1" font-size="13" fill="#212529" text-anchor="middle" font-weight="bold">身份与策略</text>
+<text x="1105.0" y="188.5" font-size="11.5" fill="#343a40" text-anchor="middle">主体与所有者</text>
+<text x="1105.0" y="204.3" font-size="11.5" fill="#343a40" text-anchor="middle">授权决策的调用点</text>
+<text x="1105.0" y="220.2" font-size="11.5" fill="#343a40" text-anchor="middle">访问令牌（第二版）</text>
+<rect x="1028" y="280" width="154" height="150" rx="6" fill="#ffffff" stroke="#adb5bd" stroke-width="1.2"/>
+<text x="1105.0" y="336.1" font-size="13" fill="#212529" text-anchor="middle" font-weight="bold">可观测</text>
+<text x="1105.0" y="352.5" font-size="11.5" fill="#343a40" text-anchor="middle">关联键 · trace</text>
+<text x="1105.0" y="368.3" font-size="11.5" fill="#343a40" text-anchor="middle">生命周期事件</text>
+<text x="1105.0" y="384.2" font-size="11.5" fill="#343a40" text-anchor="middle">指标的标签规则</text>
+<text x="1105" y="462" font-size="11" fill="#5c6670" text-anchor="middle">接缝落在会话记录、</text>
+<text x="1105" y="480" font-size="11" fill="#5c6670" text-anchor="middle">接口签名和 Router、</text>
+<text x="1105" y="498" font-size="11" fill="#5c6670" text-anchor="middle">WorkloadManager、</text>
+<text x="1105" y="516" font-size="11" fill="#5c6670" text-anchor="middle">节点适配器的调用点上</text>
+</svg>
