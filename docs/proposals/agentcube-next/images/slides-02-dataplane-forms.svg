@@ -62,7 +62,7 @@
 <path d="M327 218 L327 236" fill="none" stroke="#495057" stroke-width="1.4" marker-end="url(#head)"/>
 <text x="200" y="414" font-size="11.5" fill="#343a40" text-anchor="middle">每个 Pod 由 kube-scheduler 放置、kubelet 拉起</text>
 <text x="200" y="434" font-size="11.5" fill="#343a40" text-anchor="middle">隔离强度取决于 RuntimeClass</text>
-<text x="200" y="484" font-size="11.5" fill="#212529" text-anchor="middle" font-weight="bold">访问：Router → PodIP:端口</text>
+<text x="200" y="486" font-size="11.5" fill="#212529" text-anchor="middle" font-weight="bold">访问：Router → PodIP:端口</text>
 <rect x="406" y="6" width="388" height="48" rx="6" fill="#e6f6ec" stroke="#2f9e55" stroke-width="1.2"/>
 <text x="600.0" y="27.4" font-size="14" fill="#212529" text-anchor="middle" font-weight="bold">形态 B：占位 Pod + Kata（或开源 Kuasar）</text>
 <text x="600.0" y="44.0" font-size="11.5" fill="#343a40" text-anchor="middle">经 containerd 直接起 microVM，没有快照管理；计划的第一版</text>
@@ -79,7 +79,7 @@
 <text x="416" y="535" font-size="11.5" fill="#343a40" text-anchor="start">• 节点新增：placeholder-agent、节点适配器、Kata 和 VMM</text>
 <text x="416" y="555" font-size="11.5" fill="#343a40" text-anchor="start">• 沙箱不是 Pod；按设计不在占位 Pod 的 cgroup 下</text>
 <text x="416" y="575" font-size="11.5" fill="#343a40" text-anchor="start">• 沙箱内容就是 OCI 镜像；每次创建都是冷启动</text>
-<text x="416" y="595" font-size="11.5" fill="#343a40" text-anchor="start">• 账本、准入、开销、网络都由节点适配器负责</text>
+<text x="416" y="595" font-size="11.5" fill="#343a40" text-anchor="start">• 账本、准入、开销由节点适配器负责；网络的做法待定</text>
 <rect x="416" y="186" width="176" height="58" rx="6" fill="#f1f3f5" stroke="#868e96" stroke-width="1.2"/>
 <text x="504.0" y="204.4" font-size="12" fill="#212529" text-anchor="middle" font-weight="bold">占位 Pod（每节点一个）</text>
 <text x="504.0" y="219.9" font-size="11" fill="#343a40" text-anchor="middle">pause 或空操作 shim</text>
@@ -90,27 +90,31 @@
 <text x="693.0" y="235.1" font-size="11" fill="#343a40" text-anchor="middle">读占位 Pod，写池状态与 /resize</text>
 <path d="M693 244 L693 264" fill="none" stroke="#495057" stroke-width="1.4" marker-end="url(#head)"/>
 <text x="685" y="258" font-size="10" fill="#5c6670" text-anchor="end">容量接口（本地 socket）</text>
-<rect x="416" y="264" width="368" height="64" rx="6" fill="#e6f6ec" stroke="#2f9e55" stroke-width="1.2"/>
-<text x="600.0" y="285.4" font-size="12" fill="#212529" text-anchor="middle" font-weight="bold">节点适配器：宿主机服务或特权 DaemonSet，待定</text>
-<text x="600.0" y="300.9" font-size="11" fill="#343a40" text-anchor="middle">池的账本 · 准入 · 每沙箱 cgroup · 网络命名空间</text>
-<text x="600.0" y="316.1" font-size="11" fill="#5c6670" text-anchor="middle">WorkloadManager 经 gRPC + mTLS 直接调用</text>
-<path d="M600 328 L600 338" fill="none" stroke="#495057" stroke-width="1.4" marker-end="url(#head)"/>
-<rect x="416" y="338" width="368" height="42" rx="6" fill="#f1f3f5" stroke="#868e96" stroke-width="1.2"/>
-<text x="600.0" y="356.1" font-size="11.5" fill="#343a40" text-anchor="middle">containerd：独立 namespace，kubelet 不管这些沙箱</text>
-<text x="600.0" y="370.9" font-size="10.5" fill="#5c6670" text-anchor="middle">用 kubelet 的实例还是专用实例待定；互不干扰待验证</text>
-<path d="M600 380 L600 390" fill="none" stroke="#495057" stroke-width="1.4" marker-end="url(#head)"/>
-<rect x="416" y="390" width="368" height="80" rx="6" fill="#ffffff" stroke="#adb5bd" stroke-width="1.2" stroke-dasharray="5 4"/>
-<text x="424" y="405" font-size="10.5" fill="#5c6670" text-anchor="start">池的父 cgroup：上限 = 池大小（建议，待验证）</text>
-<rect x="424" y="412" width="112" height="50" rx="6" fill="#f3ebff" stroke="#7b55c7" stroke-width="1.2"/>
-<text x="480.0" y="434.3" font-size="12" fill="#212529" text-anchor="middle" font-weight="bold">microVM</text>
-<text x="480.0" y="449.3" font-size="10.5" fill="#343a40" text-anchor="middle">Kata shim + VMM</text>
-<rect x="544" y="412" width="112" height="50" rx="6" fill="#f3ebff" stroke="#7b55c7" stroke-width="1.2"/>
-<text x="600.0" y="434.3" font-size="12" fill="#212529" text-anchor="middle" font-weight="bold">microVM</text>
-<text x="600.0" y="449.3" font-size="10.5" fill="#343a40" text-anchor="middle">Kata shim + VMM</text>
-<rect x="664" y="412" width="112" height="50" rx="6" fill="#f3ebff" stroke="#7b55c7" stroke-width="1.2"/>
-<text x="720.0" y="434.3" font-size="12" fill="#212529" text-anchor="middle" font-weight="bold">microVM</text>
-<text x="720.0" y="449.3" font-size="10.5" fill="#343a40" text-anchor="middle">Kata shim + VMM</text>
-<text x="600" y="484" font-size="11.5" fill="#212529" text-anchor="middle" font-weight="bold">访问：第一版只在节点上可达，第二版自建数据入口</text>
+<rect x="416" y="264" width="368" height="62" rx="6" fill="#e6f6ec" stroke="#2f9e55" stroke-width="1.2"/>
+<text x="600.0" y="284.4" font-size="12" fill="#212529" text-anchor="middle" font-weight="bold">节点适配器：宿主机服务或特权 DaemonSet，待定</text>
+<text x="600.0" y="299.9" font-size="11" fill="#343a40" text-anchor="middle">池的账本 · 准入 · 每沙箱 cgroup · 网络命名空间</text>
+<text x="600.0" y="315.1" font-size="11" fill="#5c6670" text-anchor="middle">WorkloadManager 经 gRPC + mTLS 直接调用</text>
+<path d="M600 326 L600 334" fill="none" stroke="#495057" stroke-width="1.4" marker-end="url(#head)"/>
+<rect x="416" y="334" width="368" height="28" rx="6" fill="#f1f3f5" stroke="#868e96" stroke-width="1.2"/>
+<text x="600.0" y="352.2" font-size="11" fill="#343a40" text-anchor="middle">containerd（实例待定）：独立 namespace，kubelet 不管，待验证</text>
+<path d="M600 362 L600 370" fill="none" stroke="#495057" stroke-width="1.4" marker-end="url(#head)"/>
+<rect x="416" y="370" width="368" height="68" rx="6" fill="#ffffff" stroke="#adb5bd" stroke-width="1.2" stroke-dasharray="5 4"/>
+<text x="424" y="384" font-size="10.5" fill="#5c6670" text-anchor="start">池的父 cgroup：上限 = 池大小（建议，待验证）</text>
+<rect x="424" y="389" width="112" height="42" rx="6" fill="#f3ebff" stroke="#7b55c7" stroke-width="1.2"/>
+<text x="480.0" y="407.3" font-size="12" fill="#212529" text-anchor="middle" font-weight="bold">microVM</text>
+<text x="480.0" y="422.3" font-size="10.5" fill="#343a40" text-anchor="middle">Kata shim + VMM</text>
+<path d="M480 431 L480 445" fill="none" stroke="#495057" stroke-width="1.2"/>
+<rect x="544" y="389" width="112" height="42" rx="6" fill="#f3ebff" stroke="#7b55c7" stroke-width="1.2"/>
+<text x="600.0" y="407.3" font-size="12" fill="#212529" text-anchor="middle" font-weight="bold">microVM</text>
+<text x="600.0" y="422.3" font-size="10.5" fill="#343a40" text-anchor="middle">Kata shim + VMM</text>
+<path d="M600 431 L600 445" fill="none" stroke="#495057" stroke-width="1.2"/>
+<rect x="664" y="389" width="112" height="42" rx="6" fill="#f3ebff" stroke="#7b55c7" stroke-width="1.2"/>
+<text x="720.0" y="407.3" font-size="12" fill="#212529" text-anchor="middle" font-weight="bold">microVM</text>
+<text x="720.0" y="422.3" font-size="10.5" fill="#343a40" text-anchor="middle">Kata shim + VMM</text>
+<path d="M720 431 L720 445" fill="none" stroke="#495057" stroke-width="1.2"/>
+<rect x="416" y="445" width="368" height="24" rx="6" fill="#fff1e0" stroke="#e08a1e" stroke-width="1.2" stroke-dasharray="5 4"/>
+<text x="600.0" y="461.2" font-size="11" fill="#343a40" text-anchor="middle">connector（候选）：每沙箱一个 veth 端口 · 网络身份 · 入站路径</text>
+<text x="600" y="486" font-size="11.5" fill="#212529" text-anchor="middle" font-weight="bold">访问：第一版只在节点上可达，第二版自建数据入口</text>
 <rect x="806" y="6" width="388" height="48" rx="6" fill="#fff1e0" stroke="#e08a1e" stroke-width="1.2"/>
 <text x="1000.0" y="27.4" font-size="14" fill="#212529" text-anchor="middle" font-weight="bold">形态 C：占位 Pod + kuasar-sandbox / CubeSandbox</text>
 <text x="1000.0" y="44.0" font-size="11.5" fill="#343a40" text-anchor="middle">带模板快照和暂停恢复的节点栈；第二种运行时的候选</text>
@@ -142,27 +146,28 @@
 <text x="1000.0" y="281.0" font-size="12" fill="#212529" text-anchor="middle" font-weight="bold">节点适配器</text>
 <text x="1000.0" y="296.5" font-size="11" fill="#343a40" text-anchor="middle">只翻译接口；账本与准入要由节点栈做</text>
 <path d="M1000 304 L1000 314" fill="none" stroke="#495057" stroke-width="1.4" marker-end="url(#head)"/>
-<rect x="816" y="314" width="368" height="122" rx="6" fill="#fff1e0" stroke="#e08a1e" stroke-width="1.2"/>
+<rect x="816" y="314" width="368" height="126" rx="6" fill="#fff1e0" stroke="#e08a1e" stroke-width="1.2"/>
 <text x="824" y="330" font-size="11.5" fill="#212529" text-anchor="start" font-weight="bold">运行时节点栈：宿主机服务，二选一</text>
-<rect x="824" y="337" width="172" height="92" rx="6" fill="#ffffff" stroke="#adb5bd" stroke-width="1.2"/>
-<text x="910.0" y="358.4" font-size="11.5" fill="#212529" text-anchor="middle" font-weight="bold">kuasar-sandbox</text>
-<text x="910.0" y="373.2" font-size="10.5" fill="#343a40" text-anchor="middle">conductor（账本、准入）</text>
-<text x="910.0" y="387.7" font-size="10.5" fill="#343a40" text-anchor="middle">Proxy（数据入口）· connector</text>
-<text x="910.0" y="402.2" font-size="10.5" fill="#343a40" text-anchor="middle">每沙箱 sandbox-ctl + CH</text>
-<text x="910.0" y="416.7" font-size="10.5" fill="#343a40" text-anchor="middle">模板构建也在节点上</text>
-<rect x="1004" y="337" width="172" height="92" rx="6" fill="#ffffff" stroke="#adb5bd" stroke-width="1.2"/>
-<text x="1090.0" y="358.4" font-size="11.5" fill="#212529" text-anchor="middle" font-weight="bold">CubeSandbox</text>
-<text x="1090.0" y="373.2" font-size="10.5" fill="#343a40" text-anchor="middle">Cubelet（内嵌 containerd）</text>
-<text x="1090.0" y="387.7" font-size="10.5" fill="#343a40" text-anchor="middle">CubeVS · CubeEgress（网络）</text>
-<text x="1090.0" y="402.2" font-size="10.5" fill="#343a40" text-anchor="middle">每沙箱 CubeShim + VMM</text>
-<text x="1090.0" y="416.7" font-size="10.5" fill="#b3541e" text-anchor="middle">准入、入口、模板构建在集群层</text>
-<path d="M1000 436 L1000 444" fill="none" stroke="#495057" stroke-width="1.4" marker-end="url(#head)"/>
-<rect x="824" y="444" width="76" height="24" rx="6" fill="#f3ebff" stroke="#7b55c7" stroke-width="1.2"/>
-<text x="862.0" y="460.4" font-size="11.5" fill="#212529" text-anchor="middle" font-weight="bold">microVM</text>
-<rect x="908" y="444" width="76" height="24" rx="6" fill="#f3ebff" stroke="#7b55c7" stroke-width="1.2"/>
-<text x="946.0" y="460.4" font-size="11.5" fill="#212529" text-anchor="middle" font-weight="bold">microVM</text>
-<rect x="992" y="444" width="76" height="24" rx="6" fill="#f3ebff" stroke="#7b55c7" stroke-width="1.2"/>
-<text x="1030.0" y="460.4" font-size="11.5" fill="#212529" text-anchor="middle" font-weight="bold">microVM</text>
-<text x="1080" y="460" font-size="11" fill="#5c6670" text-anchor="start">可从快照恢复</text>
-<text x="1000" y="484" font-size="11.5" fill="#212529" text-anchor="middle" font-weight="bold">访问：Router → 节点数据入口，kuasar-sandbox 自带</text>
+<rect x="824" y="337" width="172" height="96" rx="6" fill="#ffffff" stroke="#adb5bd" stroke-width="1.2"/>
+<text x="910.0" y="353.1" font-size="11.5" fill="#212529" text-anchor="middle" font-weight="bold">kuasar-sandbox</text>
+<text x="910.0" y="367.9" font-size="10.5" fill="#343a40" text-anchor="middle">conductor（账本、准入）</text>
+<text x="910.0" y="382.4" font-size="10.5" fill="#343a40" text-anchor="middle">Proxy（数据入口）</text>
+<text x="910.0" y="396.9" font-size="10.5" fill="#343a40" text-anchor="middle">connector（网络）</text>
+<text x="910.0" y="411.4" font-size="10.5" fill="#343a40" text-anchor="middle">每沙箱 sandbox-ctl + CH</text>
+<text x="910.0" y="425.9" font-size="10.5" fill="#343a40" text-anchor="middle">模板构建也在节点上</text>
+<rect x="1004" y="337" width="172" height="96" rx="6" fill="#ffffff" stroke="#adb5bd" stroke-width="1.2"/>
+<text x="1090.0" y="360.4" font-size="11.5" fill="#212529" text-anchor="middle" font-weight="bold">CubeSandbox</text>
+<text x="1090.0" y="375.2" font-size="10.5" fill="#343a40" text-anchor="middle">Cubelet（内嵌 containerd）</text>
+<text x="1090.0" y="389.7" font-size="10.5" fill="#343a40" text-anchor="middle">CubeVS · CubeEgress（网络）</text>
+<text x="1090.0" y="404.2" font-size="10.5" fill="#343a40" text-anchor="middle">每沙箱 CubeShim + VMM</text>
+<text x="1090.0" y="418.7" font-size="10.5" fill="#b3541e" text-anchor="middle">准入、入口、模板构建在集群层</text>
+<path d="M1000 440 L1000 447" fill="none" stroke="#495057" stroke-width="1.4" marker-end="url(#head)"/>
+<rect x="824" y="447" width="76" height="22" rx="6" fill="#f3ebff" stroke="#7b55c7" stroke-width="1.2"/>
+<text x="862.0" y="462.4" font-size="11.5" fill="#212529" text-anchor="middle" font-weight="bold">microVM</text>
+<rect x="908" y="447" width="76" height="22" rx="6" fill="#f3ebff" stroke="#7b55c7" stroke-width="1.2"/>
+<text x="946.0" y="462.4" font-size="11.5" fill="#212529" text-anchor="middle" font-weight="bold">microVM</text>
+<rect x="992" y="447" width="76" height="22" rx="6" fill="#f3ebff" stroke="#7b55c7" stroke-width="1.2"/>
+<text x="1030.0" y="462.4" font-size="11.5" fill="#212529" text-anchor="middle" font-weight="bold">microVM</text>
+<text x="1080" y="462" font-size="11" fill="#5c6670" text-anchor="start">可从快照恢复</text>
+<text x="1000" y="486" font-size="11.5" fill="#212529" text-anchor="middle" font-weight="bold">访问：Router → 节点数据入口，kuasar-sandbox 自带</text>
 </svg>

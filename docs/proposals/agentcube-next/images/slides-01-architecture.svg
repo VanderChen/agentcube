@@ -98,33 +98,35 @@
 <path d="M548 352 L548 410" fill="none" stroke="#495057" stroke-width="1.4" marker-end="url(#head)"/>
 <path d="M735 242 L735 410" fill="none" stroke="#495057" stroke-width="1.4" marker-end="url(#head)"/>
 <path d="M850 432 L836 432" fill="none" stroke="#495057" stroke-width="1.4" marker-end="url(#head)"/>
-<rect x="476" y="474" width="250" height="108" rx="6" fill="#fff1e0" stroke="#e08a1e" stroke-width="1.2"/>
-<text x="601" y="492" font-size="12" fill="#212529" text-anchor="middle" font-weight="bold">形态 B：containerd + Kata</text>
-<text x="601" y="509" font-size="11.5" fill="#343a40" text-anchor="middle">账本与准入在节点适配器</text>
-<rect x="488" y="520" width="70" height="52" rx="6" fill="#f3ebff" stroke="#7b55c7" stroke-width="1.2"/>
-<text x="523.0" y="543.1" font-size="11.5" fill="#212529" text-anchor="middle" font-weight="bold">microVM</text>
-<text x="523.0" y="557.9" font-size="10.5" fill="#343a40" text-anchor="middle">沙箱</text>
-<rect x="566" y="520" width="70" height="52" rx="6" fill="#f3ebff" stroke="#7b55c7" stroke-width="1.2"/>
-<text x="601.0" y="543.1" font-size="11.5" fill="#212529" text-anchor="middle" font-weight="bold">microVM</text>
-<text x="601.0" y="557.9" font-size="10.5" fill="#343a40" text-anchor="middle">沙箱</text>
-<rect x="644" y="520" width="70" height="52" rx="6" fill="#f3ebff" stroke="#7b55c7" stroke-width="1.2"/>
-<text x="679.0" y="543.1" font-size="11.5" fill="#212529" text-anchor="middle" font-weight="bold">microVM</text>
-<text x="679.0" y="557.9" font-size="10.5" fill="#343a40" text-anchor="middle">沙箱</text>
-<rect x="736" y="474" width="250" height="108" rx="6" fill="#fff1e0" stroke="#e08a1e" stroke-width="1.2"/>
-<text x="861" y="492" font-size="12" fill="#212529" text-anchor="middle" font-weight="bold">形态 C：带快照的节点栈</text>
-<text x="861" y="509" font-size="11.5" fill="#343a40" text-anchor="middle">kuasar-sandbox / CubeSandbox</text>
-<rect x="748" y="520" width="70" height="52" rx="6" fill="#f3ebff" stroke="#7b55c7" stroke-width="1.2"/>
-<text x="783.0" y="543.1" font-size="11.5" fill="#212529" text-anchor="middle" font-weight="bold">microVM</text>
-<text x="783.0" y="557.9" font-size="10.5" fill="#343a40" text-anchor="middle">沙箱</text>
-<rect x="826" y="520" width="70" height="52" rx="6" fill="#f3ebff" stroke="#7b55c7" stroke-width="1.2"/>
-<text x="861.0" y="543.1" font-size="11.5" fill="#212529" text-anchor="middle" font-weight="bold">microVM</text>
-<text x="861.0" y="557.9" font-size="10.5" fill="#343a40" text-anchor="middle">沙箱</text>
-<rect x="904" y="520" width="70" height="52" rx="6" fill="#f3ebff" stroke="#7b55c7" stroke-width="1.2"/>
-<text x="939.0" y="543.1" font-size="11.5" fill="#212529" text-anchor="middle" font-weight="bold">microVM</text>
-<text x="939.0" y="557.9" font-size="10.5" fill="#343a40" text-anchor="middle">沙箱</text>
-<path d="M680 454 L680 474" fill="none" stroke="#495057" stroke-width="1.4" marker-end="url(#head)"/>
-<path d="M790 454 L790 474" fill="none" stroke="#495057" stroke-width="1.4" marker-end="url(#head)"/>
-<text x="731" y="599" font-size="11" fill="#5c6670" text-anchor="middle">池路径的数据路径：第一版没有，第二版起经节点数据入口</text>
+<rect x="476" y="472" width="250" height="92" rx="6" fill="#fff1e0" stroke="#e08a1e" stroke-width="1.2"/>
+<text x="601" y="489" font-size="12" fill="#212529" text-anchor="middle" font-weight="bold">形态 B：containerd + Kata</text>
+<text x="601" y="505" font-size="11.5" fill="#343a40" text-anchor="middle">账本与准入在节点适配器</text>
+<rect x="488" y="514" width="70" height="42" rx="6" fill="#f3ebff" stroke="#7b55c7" stroke-width="1.2"/>
+<text x="523.0" y="532.1" font-size="11.5" fill="#212529" text-anchor="middle" font-weight="bold">microVM</text>
+<text x="523.0" y="546.9" font-size="10.5" fill="#343a40" text-anchor="middle">沙箱</text>
+<rect x="566" y="514" width="70" height="42" rx="6" fill="#f3ebff" stroke="#7b55c7" stroke-width="1.2"/>
+<text x="601.0" y="532.1" font-size="11.5" fill="#212529" text-anchor="middle" font-weight="bold">microVM</text>
+<text x="601.0" y="546.9" font-size="10.5" fill="#343a40" text-anchor="middle">沙箱</text>
+<rect x="644" y="514" width="70" height="42" rx="6" fill="#f3ebff" stroke="#7b55c7" stroke-width="1.2"/>
+<text x="679.0" y="532.1" font-size="11.5" fill="#212529" text-anchor="middle" font-weight="bold">microVM</text>
+<text x="679.0" y="546.9" font-size="10.5" fill="#343a40" text-anchor="middle">沙箱</text>
+<rect x="736" y="472" width="250" height="92" rx="6" fill="#fff1e0" stroke="#e08a1e" stroke-width="1.2"/>
+<text x="861" y="489" font-size="12" fill="#212529" text-anchor="middle" font-weight="bold">形态 C：带快照的节点栈</text>
+<text x="861" y="505" font-size="11.5" fill="#343a40" text-anchor="middle">kuasar-sandbox / CubeSandbox</text>
+<rect x="748" y="514" width="70" height="42" rx="6" fill="#f3ebff" stroke="#7b55c7" stroke-width="1.2"/>
+<text x="783.0" y="532.1" font-size="11.5" fill="#212529" text-anchor="middle" font-weight="bold">microVM</text>
+<text x="783.0" y="546.9" font-size="10.5" fill="#343a40" text-anchor="middle">沙箱</text>
+<rect x="826" y="514" width="70" height="42" rx="6" fill="#f3ebff" stroke="#7b55c7" stroke-width="1.2"/>
+<text x="861.0" y="532.1" font-size="11.5" fill="#212529" text-anchor="middle" font-weight="bold">microVM</text>
+<text x="861.0" y="546.9" font-size="10.5" fill="#343a40" text-anchor="middle">沙箱</text>
+<rect x="904" y="514" width="70" height="42" rx="6" fill="#f3ebff" stroke="#7b55c7" stroke-width="1.2"/>
+<text x="939.0" y="532.1" font-size="11.5" fill="#212529" text-anchor="middle" font-weight="bold">microVM</text>
+<text x="939.0" y="546.9" font-size="10.5" fill="#343a40" text-anchor="middle">沙箱</text>
+<path d="M680 454 L680 472" fill="none" stroke="#495057" stroke-width="1.4" marker-end="url(#head)"/>
+<path d="M790 454 L790 472" fill="none" stroke="#495057" stroke-width="1.4" marker-end="url(#head)"/>
+<rect x="476" y="568" width="510" height="18" rx="4" fill="#fff1e0" stroke="#e08a1e" stroke-width="1.2" stroke-dasharray="5 4"/>
+<text x="731" y="581" font-size="10.5" fill="#343a40" text-anchor="middle">沙箱网络：connector（候选）可用于形态 B 和 kuasar-sandbox；CubeSandbox 用自带的 CubeVS</text>
+<text x="731" y="601" font-size="11" fill="#5c6670" text-anchor="middle">池路径的数据路径：第一版没有，第二版起经节点数据入口</text>
 <path d="M300 109 L120 109 L120 494 L140 494" fill="none" stroke="#495057" stroke-width="1.4" stroke-dasharray="5 4" marker-end="url(#head)"/>
 <text x="112" y="310" font-size="11" fill="#5c6670" text-anchor="middle" transform="rotate(-90 112 310)">数据路径：Router 到沙箱入口</text>
 <rect x="1016" y="62" width="178" height="552" rx="4" fill="#fafbfc" stroke="#dee2e6" stroke-width="1"/>
