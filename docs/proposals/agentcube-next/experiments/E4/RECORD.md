@@ -5,6 +5,7 @@
 - 计划：`PLAN.md`。批准：负责人 2026-11-25 要求继续验证，直到能回答 Kata 或 CubeSandbox 在这台 AMD 机器的 PVM 上是否可用。
 - 起因：E1 到 E3 的记录交给子代理复核，它指出 E2 的归因有一个没有控制的变量（宿主的启动参数），并缺一个对照。E4 把这两处补上。
 - 结果：**E2 与 E3 的差别不能用启动参数解释。测到的是：这两个宿主（内核连同它的 PVM 模块）和这两个 guest 内核只能按原配用，启动参数相同也一样；换过来 guest 就复位。原因没有查。** 另外测到：CubeSandbox 的宿主内核只带 `nokaslr no5lvl` 启动时，同一次启动里 CubeSandbox 和 Kata（换用 CubeSandbox 的 guest 内核，Dragonball 和 Cloud Hypervisor）都起得了沙箱。
+- 之后的决定：负责人 2026-11-25 看到结果之后说明不需要 Kata 与 CubeSandbox 并存，以后同一个节点上也只放一种运行时。本记录里“同一个宿主上两者并存”那一部分因此只作记录。
 - 这份记录写成之后由一个子代理复核，对照了日志。数字和通过与否都对；它指出几处措辞比证据强、几处把推断写成了测到，已经改进正文，改了什么列在第 10 节。
 
 ## 1. 结论
@@ -145,7 +146,7 @@ tools/vmrun.sh E4 06-localize 08c-localize.sh
 - CubeSandbox 本身在带 `no5lvl` 的 Ubuntu 宿主上：只直接启动了它的 guest 内核。
 - CubeSandbox 的整串启动参数配 Ubuntu 的内核。
 - `no5lvl` 在 CubeSandbox 的宿主内核上是不是必需的；少掉的那些启动参数对时钟、性能、长时间运行的影响。
-- 两种运行时的 microVM 同时存在；同时带负载。
+- 两种运行时的 microVM 同时存在；同时带负载。负责人 2026-11-25 说明不需要两者并存，这两项和上面“Kata 配 CubeSandbox 的 guest 内核”的各项都不再补。
 
 ## 10. 复核之后的更正
 
