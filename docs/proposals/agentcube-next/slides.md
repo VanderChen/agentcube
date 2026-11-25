@@ -1,7 +1,7 @@
 ---
 marp: true
 title: AgentCube Next：三种数据面形态（讨论材料）
-footer: AgentCube Next · 三种数据面形态 · 讨论稿 2026-11-24 · 结论来自静态阅读，没有做实验
+footer: AgentCube Next · 三种数据面形态 · 讨论稿 2026-11-25 · 比较来自静态阅读，没有实测
 ---
 
 <!--
@@ -21,13 +21,13 @@ style: |
   section.notes p { margin: 4px 0; }
 -->
 
-## 1. 整体架构：控制面共用，数据面在后端接口处分叉
+## 1. 整体架构：支持多个后端，一次部署只运行一套
 
-![AgentCube Next 整体架构：Router、WorkloadManager、会话存储共用；pod 后端经 agent-sandbox 到 Pod，pool 后端经节点适配器到占位 Pod 划出的容量](images/slides-01-architecture.svg)
+![AgentCube Next 整体架构：Router、WorkloadManager、会话存储对各后端相同；pod 后端经 agent-sandbox 到 Pod，pool 后端经节点适配器到占位 Pod 划出的容量；一次部署只启用其中一个后端](images/slides-01-architecture.svg)
 
 ---
 
-## 2. 三种数据面形态怎样部署
+## 2. 三种数据面形态怎样部署（一次部署取其一）
 
 ![三种数据面形态的部署：形态 A 每个沙箱一个 Pod；形态 B 占位 Pod 加节点适配器，经 containerd 和 Kata 起 microVM；形态 C 占位 Pod 加节点适配器，后面是带快照的节点栈](images/slides-02-dataplane-forms.svg)
 
@@ -37,7 +37,7 @@ style: |
 
 ## 3. 三种形态的比较
 
-| 方面 | 形态 A：Pod（agent-sandbox）<br>现有的 `pod` 后端，保留 | 形态 B：占位 Pod + Kata（或开源 Kuasar ⁹）<br>计划的第一版 | 形态 C：占位 Pod + kuasar-sandbox / CubeSandbox<br>带快照的第二种运行时的候选，第四版之前接入 |
+| 方面 | 形态 A：Pod（agent-sandbox）<br>现有的 `pod` 后端，保留 | 形态 B：占位 Pod + Kata（或开源 Kuasar ⁹）<br>计划的第一版 | 形态 C：占位 Pod + kuasar-sandbox / CubeSandbox<br>带快照的第二种运行时的候选，第四版之前支持 |
 |---|---|---|---|
 | Kubernetes 对象与原生能力 | 每沙箱一个 `Sandbox` 和一个 Pod（预热时加 `SandboxClaim`）；kubectl、配额、NetworkPolicy、PVC、驱逐都作用得到 | 没有逐沙箱的对象，这些机制作用不到沙箱；每节点一个 `SandboxPool` 和一个占位 Pod | 同形态 B |
 | 发放路径 | API server → agent-sandbox 控制器 → 调度器 → kubelet → 容器运行时 | 沙箱调度器 → 节点适配器 → containerd → Kata → VMM，不经 Kubernetes API | 沙箱调度器 → 节点适配器 → 节点栈的私有接口 → VMM，不经 Kubernetes API |
@@ -49,7 +49,7 @@ style: |
 | 池容量调整 | 没有容量池；预热池的大小改 `SandboxWarmPool` 的副本数 | 占位 Pod 原地 resize（最低版本拟定 Kubernetes 1.35，未确认），节点一侧改账本上的数字；手工调整在第一版 | 同形态 B，另加节点一侧：kuasar-sandbox 要重启 conductor；CubeSandbox 配额可热加载，约束力未核实 |
 | 每沙箱开销 | 一个完整的 Pod，用 Kata 时另加虚拟机的开销；没有读到数字 | 默认规格 1 vCPU、2048 MiB 是上限，不预分配；Kata 文档自述每台平均占 223 MiB（QEMU，busybox）；固定开销由 000-5 实测 ² | CubeSandbox 自述 2000 MiB 规格的沙箱每台摊销宿主内存 18.7 至 24.6 MiB；kuasar-sandbox 没有读到数字 ³ |
 | 隔离与节点前提 | 隔离取决于 RuntimeClass（runc、gVisor、Kata）；普通节点即可 | 每沙箱一台 Kata microVM，内容即 OCI 镜像；节点要 `/dev/kvm`，装 Kata、VMM、`placeholder-agent`、节点适配器 | 每沙箱一台 microVM，镜像要先做成模板；节点要 KVM，装整套节点栈；占位 Pod 一侧的前提同形态 B ⁸ |
-| 主要代价 | 逐沙箱的对象与调度开销；预热占真实资源；没有内存快照 | 冷启动；账本、准入、网络都自己做；requests 只是记账，节点压力下的行为没验证；要快照得接第二种运行时或等 Kata 上游 | 节点栈重；与 Kubernetes 节点共存的形态和节点压力下的行为都没有验证；CubeSandbox 还要补它集群层的那几样 |
+| 主要代价 | 逐沙箱的对象与调度开销；预热占真实资源；没有内存快照 | 冷启动；账本、准入、网络都自己做；requests 只是记账，节点压力下的行为没验证；要快照得换成形态 C 的部署或等 Kata 上游 | 节点栈重；与 Kubernetes 节点共存的形态和节点压力下的行为都没有验证；CubeSandbox 还要补它集群层的那几样 |
 
 ---
 
@@ -71,5 +71,6 @@ style: |
 8. **形态 C 的节点前提与共存。** kuasar-sandbox 还要 userfaultfd、eBPF 和 4 KiB 的宿主页，检索不到 PVM 的支持；它的系统容器镜像不能原样作为 Pod 运行，生产形态是宿主机上的 systemd 服务或 Podman 系统容器。CubeSandbox 可以换装 PVM 宿主内核，默认的存储要求数据目录支持 reflink；它的 Kubernetes 部署还是预览。两者的节点栈与占位 Pod 之间的资源关系都没有设计。
 9. **开源 Kuasar（kuasar-io/kuasar）。** 它与 Kata 同类：建在 containerd Sandbox API 之上，用常驻的 sandboxer 代替每沙箱一个 shim，支持 Cloud Hypervisor、QEMU、StratoVirt。只读过它的 README，没有在形态 B 的位置上评估过；计划的第一版取 Kata，表里形态 B 一列写的都是 Kata 上的事实。它与形态 C 的 kuasar-sandbox（`kuasar-sandbox` 组织）不是同一个项目，后者不经 containerd。
 10. **connector 作为形态 B 与形态 C 共用的网络部件。** connector 是 kuasar-sandbox 的节点交换机，用 eBPF 转发，取 kuasar-sandbox 的形态 C 本来就用它。它的 README 写明可以单独部署，并经 TAP 文件描述符的交接配别的 microVM 运行时；Kata 没有实现这种交接。按静态阅读，形态 B 可以改用它的 veth 端口：把 veth 的一端移进沙箱的网络命名空间，Kata 和 runc 都从命名空间里的网卡接网。这不是上游写明的集成途径，没有人验证过；已知的疑点是端口设备在沙箱之间回收再用，Kata 异常退出后留在 veth 上的过滤规则可能挡住下一次接入。取 CubeSandbox 的形态 C 换不了，它的网络是 Cubelet 直接调用的 CubeVS。connector 给的是每沙箱隔离的端口、guest 伪造不了的端口身份和从节点进沙箱的入站路径；连接跟踪、有状态的 NAT 和出站策略它都不做，出站要外部网关或自备的出口。与 kuasar-sandbox 能用同一套的是寻址和网络身份，数据入口仍要自建。代价：节点上多一个要 root 和 eBPF 的部件，每个交换机最多 4096 个端口，要出站还要一块专用的上联网卡，eBPF 程序是 GPL-2.0-only。实验是 [000-5](subtasks/000-5-kata-runtime-spikes.md) 的 KA-7、KB-7；取不取是待决定事项 D20。
+11. **一次部署只运行一套后端（2026-11-25 定，[README](README.md) 的 D22）。** 定下来的：三种形态是三种部署，一次部署取其一，WorkloadManager 只启用一个后端；不支持带着存量会话换后端；对客户的接口要在各后端之间拉齐，`pool` 部署里的 `AgentRuntime` 是遗留项。计划作者的推论：补齐之前形态 B 的部署里 `AgentRuntime` 不可用；第一版的形态 B 部署没有数据入口，只用来验证。第一页的图画的是支持的全部后端。
 
 形态 B 的设计和路线取舍的依据见 [README](README.md) 的“方向更新”一节和 [gap-analysis.md](gap-analysis.md) 第 3.3、4.2 节。
