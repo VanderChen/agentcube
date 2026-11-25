@@ -1,0 +1,35 @@
+2026-11-25T04:16:24Z | step 01-entry | scripts/01-entry.sh | sha256 de75794a681040cf23f4f3df326767689051e49397f8d46c4c3d9d02b2b16fe4 | env: ID=e4-pvm-139-no5lvl EXTRA=no5lvl | exit=0 | log-01-entry.txt
+2026-11-25T04:16:37Z | step 02-reboot-no5lvl | scripts/02-reboot.sh | sha256 5de586837af598ffd0054eabb7607d65837b6022cd12368282cec0493b6dfddd | env: ENTRY=e4-pvm-139-no5lvl | exit=2 | log-02-reboot-no5lvl.txt
+2026-11-25T04:16:43Z | wait 02-reboot-no5lvl | tools/vmwait.sh | reachable on try 1 at 2026-11-25T04:17:10Z: kernel=6.8.0-139-generic boot_id=<uuid> up_since=2026-11-25T03:52:19 | exit=0 | log-02-reboot-no5lvl.txt
+2026-11-25T04:17:10Z | step 03-after-boot | scripts/03-after-boot.sh | sha256 df6cf59d6c6d993ebbc04d27d8f5c479380f06012ecd9bb4b67d2829c623130a | env:  | exit=1 | log-03-after-boot.txt
+2026-11-25T04:17:26Z | step 02-reboot-no5lvl | scripts/02-reboot.sh | sha256 1469e5365eee0eaa89a5e46de56bfbd2618b705ddc8280437fa66fda1cf8e325 | env: ENTRY=e4-pvm-139-no5lvl | exit=0 | log-02-reboot-no5lvl.txt
+2026-11-25T04:17:32Z | wait 02-reboot-no5lvl | tools/vmwait.sh | reachable on try 4 at 2026-11-25T04:18:41Z: kernel=6.8.0-139-generic boot_id=<uuid> up_since=2026-11-25T04:18:25 | exit=0 | log-02-reboot-no5lvl.txt
+2026-11-25T04:18:41Z | step 03-after-boot | scripts/03-after-boot.sh | sha256 df6cf59d6c6d993ebbc04d27d8f5c479380f06012ecd9bb4b67d2829c623130a | env:  | exit=0 | log-03-after-boot.txt
+2026-11-25T04:18:54Z | step 04-localize | scripts/08c-localize.sh | sha256 48ef51e712ba1105f7ff30cc99d97b351c83036013616587bab651f4ccfb1cc6 | env:  | exit=0 | log-04-localize.txt
+2026-11-25T04:20:57Z | step 01b-entry-cube-host | scripts/01b-entry-cube-host.sh | sha256 733d2f74ff70c215b3547e460f39e644d99e9c7a413f98f9a3d8f1faec046256 | env: ID=e4-cube-host-min PARAMS=console=<原有的串口设置> net.ifnames=0 nokaslr no5lvl | exit=0 | log-01b-entry-cube-host.txt
+2026-11-25T04:21:11Z | step 05-reboot-cube-host-min | scripts/02-reboot.sh | sha256 1469e5365eee0eaa89a5e46de56bfbd2618b705ddc8280437fa66fda1cf8e325 | env: ENTRY=e4-cube-host-min | exit=0 | log-05-reboot-cube-host-min.txt
+2026-11-25T04:21:17Z | wait 05-reboot-cube-host-min | tools/vmwait.sh | reachable on try 3 at 2026-11-25T04:22:16Z: kernel=6.6.117-opencloudos9.cubesandbox.pvm.host-gbc75224fca7e boot_id=<uuid> up_since=2026-11-25T04:22:05 | exit=0 | log-05-reboot-cube-host-min.txt
+2026-11-25T04:22:16Z | step 05-after-boot-cube-host-min | scripts/03b-after-boot-cube-host.sh | sha256 ff2cf3f09f9df38e09c3bf85c75e2be59747f9c71f09dac198f2300ee7acd749 | env:  | exit=0 | log-05-after-boot-cube-host-min.txt
+2026-11-25T04:22:22Z | step 06-localize-cube-host-min | scripts/08c-localize.sh | sha256 48ef51e712ba1105f7ff30cc99d97b351c83036013616587bab651f4ccfb1cc6 | env:  | exit=0 | log-06-localize-cube-host-min.txt
+2026-11-25T04:24:25Z | step 07-kata-config-cube-guest | scripts/07-kata-config-cube-guest.sh | sha256 c589a23327e4a843db2b7b457f6e948f04b095de74126dd2bb907276f43342c4 | env:  | exit=141 | log-07-kata-config-cube-guest.txt
+2026-11-25T04:24:31Z | step 08-kata-cube-guest-on-cube-host | scripts/08-kata-kb1.sh | sha256 09097626940af28f46472d846c134106401996eb164d4775e5ca73e9e10e77a7 | env: CONF=/etc/kata-containers/pvm-cube-guest | exit=1 | log-08-kata-cube-guest-on-cube-host.txt
+2026-11-25T04:25:28Z | step 09-xfs | scripts/03-xfs.sh | sha256 d318ef1ab30abe9888fe67dc0140c143160d3bf7a462629ef89ade8306be4c2d | env:  | exit=0 | log-09-xfs.txt
+2026-11-25T04:25:34Z | step 09-firewall | scripts/02-firewall.sh | sha256 2d507b69f1b499bc17d2a208737350a721ac72bd71f084bebe81d54c8d8bfb10 | env: MODE=apply | exit=0 | log-09-firewall.txt
+2026-11-25T04:25:40Z | step 09-deadman | scripts/01-deadman.sh | sha256 4bfea5dd161bd719d07423f4775acd63f25ded3706ae12bb6c4f2d212674025c | env: MODE=arm MINUTES=40 | exit=0 | log-09-deadman.txt
+2026-11-25T04:25:45Z | step 09-start-cube | scripts/05-start-cube.sh | sha256 3a1cece723a2023470e044d78dd38d139ae192be5f1e4ff7b1e6e348cae11912 | env:  | exit=0 | log-09-start-cube.txt
+2026-11-25T04:26:10Z | port probe 09-portprobe | tools/portprobe.sh 22 80 443 3000 9000 12088 8089 | log-09-portprobe.txt
+2026-11-25T04:26:50Z | step 09-guard-docker-again | scripts/01a-guard.sh | sha256 87d893a1480615dd309a47b7c03573223677c30ecd4debbc750a15af8f036864 | env: MODE=install | exit=0 | log-09-guard-docker-again.txt
+2026-11-25T04:26:57Z | step 10-quickstart | scripts/09-quickstart.sh | sha256 c20029aee7268671edcbd9c3d68470e0f1e8b9ba2213f66f05cacc4fd8e25f15 | env: W=/root/e2/quickstart-e4 | exit=0 | log-10-quickstart.txt
+2026-11-25T04:27:29Z | step 11-cycles | scripts/10-cycles.sh | sha256 33dfc8967975cac65aacc2b07c62b2fc3db6b9c49316e89db102fcc1fe20f8fd | env: W=/root/e2/quickstart-e4 | exit=0 | log-11-cycles.txt
+2026-11-25T04:27:38Z | step 12-kata-while-cube-runs | scripts/08-kata-kb1.sh | sha256 09097626940af28f46472d846c134106401996eb164d4775e5ca73e9e10e77a7 | env: CONF=/etc/kata-containers/pvm-cube-guest HYPERVISORS=dragonball clh | exit=0 | log-12-kata-while-cube-runs.txt
+2026-11-25T04:28:15Z | step 13-finish | scripts/10-finish.sh | sha256 1e63b5efcd53b462ac960ae096e616046876a29fb6ee4cb18e1fe7a18cc27ff9 | env:  | exit=0 | log-13-finish.txt
+2026-11-25T04:28:24Z | step 14-reboot-to-pvm-host | scripts/02-reboot.sh | sha256 1469e5365eee0eaa89a5e46de56bfbd2618b705ddc8280437fa66fda1cf8e325 | env: ENTRY=e0-pvm-139 | exit=0 | log-14-reboot-to-pvm-host.txt
+2026-11-25T04:28:30Z | wait 14-reboot-to-pvm-host | tools/vmwait.sh | reachable on try 5 at 2026-11-25T04:29:54Z: kernel=6.8.0-139-generic boot_id=<uuid> up_since=2026-11-25T04:29:37 | exit=0 | log-14-reboot-to-pvm-host.txt
+2026-11-25T04:29:54Z | step 14-after-boot-139 | scripts/11-after-boot-139.sh | sha256 0743d4c38cb7e9ff36088711344bc0d2cd7305a728ac16f2edc550a27c3153ab | env: EXPECT=139 | exit=0 | log-14-after-boot-139.txt
+2026-11-25T04:30:09Z | step 15-final | scripts/12-final.sh | sha256 6cd0bb6ad8177edbf0352026d8a35260189da1c1a3dba4b8ff53fef1b18ae506 | env:  | exit=0 | log-15-final.txt
+2026-11-25T04:30:16Z | step 15-kata-smoke | scripts/07-kata-smoke.sh | sha256 95545c83bf32e9a3c1206b002f383395c9ee3297a46cc4efafda14050ca62c16 | env:  | exit=0 | log-15-kata-smoke.txt
+2026-11-25T04:30:45Z | step 16-state | scripts/13-state.sh | sha256 87b54af7f77fcf5cc4c463b28f97dbe3fa9feedbabaf13fbc79e5706e8288dea | env:  | exit=0 | log-16-state.txt
+2026-11-25T04:30:53Z | port probe 16-portprobe | tools/portprobe.sh 22 80 443 3000 9000 12088 | log-16-portprobe.txt
+2026-11-25T04:57:47Z | step 17-cleanup-kb1-qemu | scripts/17-cleanup-kb1-qemu.sh | sha256 1d2ad0ab2904f0420a51c7a621e1f41f2c990680e3ffc24bdc0b1dfab6a86d11 | env:  | exit=0 | log-17-cleanup-kb1-qemu.txt
+2026-11-25T04:57:58Z | step 18-state-supplement | scripts/18-state-supplement.sh | sha256 3b40735433d01f2ef1eda523fadeb518085b18a51993df94e68385da23646609 | env:  | exit=0 | log-18-state-supplement.txt
+2026-11-25T04:58:14Z | step 18-state-supplement | scripts/18-state-supplement.sh | sha256 8d8efb0a0d72f2701ef7196025607d887a4d10ef1639c0e7cbe474ef8a9160b2 | env:  | exit=0 | log-18-state-supplement.txt

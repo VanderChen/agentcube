@@ -1,0 +1,23 @@
+2026-11-25T03:13:41Z | step 00-preflight | scripts/00-preflight.sh | sha256 5bbb3929c6c72aa72f306864f7a88022c1bfb6a2d8cf0658483b2101e737bc1d | env:  | exit=0 | log-00-preflight.txt
+2026-11-25T03:19:03Z | step 03-xfs | scripts/03-xfs.sh | sha256 d318ef1ab30abe9888fe67dc0140c143160d3bf7a462629ef89ade8306be4c2d | env:  | exit=0 | log-03-xfs.txt
+2026-11-25T03:19:09Z | step 04-bundle | scripts/04-bundle.sh | sha256 5e20e5eb9708cc9306c7bf8a61b24474a9a45cd99fe92584e552572a74f7c323 | env: EXPECT_SHA256=06e0cce7b43cbff831504a3cb21687c69841d6be743125bc32a138929b796ad3 | exit=0 | log-04-bundle.txt
+2026-11-25T03:19:39Z | step 05-images | scripts/05-images.sh | sha256 0410151e04c70cf721b3ad219eb8f3e40b2b72234e07aac55218515660a983cd | env:  | exit=0 | log-05-images.txt
+2026-11-25T03:25:59Z | step 01a-guard | scripts/01a-guard.sh | sha256 87d893a1480615dd309a47b7c03573223677c30ecd4debbc750a15af8f036864 | env: MODE=install | exit=0 | log-01a-guard.txt
+2026-11-25T03:26:12Z | step 01b-pin-default | scripts/01b-pin-default.sh | sha256 431680cbdd09adbd6cad563da070c08891b6e63e3fdd4ed5c5decb76cbe6c3e6 | env:  | exit=0 | log-01b-pin-default.txt
+2026-11-25T03:26:24Z | step 01c-drill-to-default | scripts/01c-reboot.sh | sha256 851d263df5450fba230b1526ff2c0b55faa295c88cebbeefaf32c4511cf77dd7 | env: TARGET=default | exit=0 | log-01c-drill-to-default.txt
+2026-11-25T03:26:29Z | wait 01c-drill-to-default | tools/vmwait.sh | reachable on try 6 at 2026-11-25T03:28:04Z: kernel=6.8.0-149-generic boot_id=<uuid> up_since=2026-11-25T03:27:49 | exit=0 | log-01c-drill-to-default.txt
+2026-11-25T03:28:04Z | step 01d-drill-on-default | scripts/01d-after-boot.sh | sha256 2ed4a8c4b8931f3d87c3bb1b3ceb3bd8c0e96fa123136a3e78ee0f6c33af611e | env: EXPECT=149 | exit=0 | log-01d-drill-on-default.txt
+2026-11-25T03:28:21Z | step 01c-drill-to-pvm | scripts/01c-reboot.sh | sha256 851d263df5450fba230b1526ff2c0b55faa295c88cebbeefaf32c4511cf77dd7 | env: TARGET=pvm | exit=0 | log-01c-drill-to-pvm.txt
+2026-11-25T03:28:26Z | wait 01c-drill-to-pvm | tools/vmwait.sh | reachable on try 5 at 2026-11-25T03:29:52Z: kernel=6.8.0-139-generic boot_id=<uuid> up_since=2026-11-25T03:29:42 | exit=0 | log-01c-drill-to-pvm.txt
+2026-11-25T03:29:53Z | step 01d-drill-on-pvm | scripts/01d-after-boot.sh | sha256 0743d4c38cb7e9ff36088711344bc0d2cd7305a728ac16f2edc550a27c3153ab | env: EXPECT=139 | exit=0 | log-01d-drill-on-pvm.txt
+2026-11-25T03:30:16Z | step 01-deadman | scripts/01-deadman.sh | sha256 4bfea5dd161bd719d07423f4775acd63f25ded3706ae12bb6c4f2d212674025c | env: MODE=arm MINUTES=45 | exit=0 | log-01-deadman.txt
+2026-11-25T03:30:21Z | step 02-firewall | scripts/02-firewall.sh | sha256 e1251fa43369757d258a5ab01eecd6a40c3a81f2cf9a590feeba5cb6a6c73643 | env: MODE=apply | exit=0 | log-02-firewall.txt
+2026-11-25T03:30:27Z | step 01-deadman | scripts/01-deadman.sh | sha256 4bfea5dd161bd719d07423f4775acd63f25ded3706ae12bb6c4f2d212674025c | env: MODE=arm MINUTES=60 | exit=0 | log-01-deadman.txt
+2026-11-25T03:30:40Z | step 06-install | scripts/06-install.sh | sha256 01ccffbbc1294af5ba8b8d91a4ccea08d2d681365e89e69d50273a0c4e31972e | env:  | exit=0 | log-06-install.txt
+2026-11-25T03:33:21Z | step 01-deadman | scripts/01-deadman.sh | sha256 4bfea5dd161bd719d07423f4775acd63f25ded3706ae12bb6c4f2d212674025c | env: MODE=arm MINUTES=60 | exit=0 | log-01-deadman.txt
+2026-11-25T03:33:27Z | step 07-status | scripts/07-status.sh | sha256 55a300904a01cc50bd262036c15b86466226b2ca6d87cdc40e4bb7b4ba018d73 | env: SINCE=2026-11-25 03:30:00 | exit=0 | log-07-status.txt
+2026-11-25T03:33:42Z | port probe 07-portprobe | tools/portprobe.sh 22 80 443 3000 3010 8080 8082 8083 8089 8443 8890 9000 9090 9966 9998 9999 12088 3306 6379 | log-07-portprobe.txt
+2026-11-25T03:35:12Z | step 01a-guard | scripts/01a-guard.sh | sha256 87d893a1480615dd309a47b7c03573223677c30ecd4debbc750a15af8f036864 | env: MODE=status | exit=0 | log-01a-guard.txt
+2026-11-25T03:35:25Z | step 08-pvm-project-test | scripts/08-pvm-project-test.sh | sha256 a141e9dc2a4d060c84d200fe59afc14f2e9b2a9844d17611645c3c1cfb2f608d | env:  | exit=1 | log-08-pvm-project-test.txt
+2026-11-25T03:35:58Z | step 08b-failure-evidence | scripts/08b-failure-evidence.sh | sha256 124b1a39c0d47612df9dfc66e5e7659f14c6bce35d7637567405958dd047f619 | env:  | exit=0 | log-08b-failure-evidence.txt
+2026-11-25T03:37:50Z | step 08c-localize | scripts/08c-localize.sh | sha256 48ef51e712ba1105f7ff30cc99d97b351c83036013616587bab651f4ccfb1cc6 | env:  | exit=0 | log-08c-localize.txt

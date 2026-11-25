@@ -1,0 +1,24 @@
+2026-11-25T03:42:37Z | step 01-host-kernel | scripts/01-host-kernel.sh | sha256 624b701016d6af20a7194b70b7143be1b734671e20f7075008200500f3d84f3e | env: EXPECT_SHA256=821f260869b96e875505b7c947fa5deffbf5daf95cb36751314a1e04c9906da6 | exit=0 | log-01-host-kernel.txt
+2026-11-25T03:43:03Z | step 02-reboot-to-cube-host | scripts/02-reboot.sh | sha256 5de586837af598ffd0054eabb7607d65837b6022cd12368282cec0493b6dfddd | env: ENTRY=e3-cube-pvm-host | exit=0 | log-02-reboot-to-cube-host.txt
+2026-11-25T03:43:12Z | wait 02-reboot-to-cube-host | tools/vmwait.sh | reachable on try 8 at 2026-11-25T03:44:52Z: kernel=6.6.117-opencloudos9.cubesandbox.pvm.host-gbc75224fca7e boot_id=<uuid> up_since=2026-11-25T03:44:46 | exit=0 | log-02-reboot-to-cube-host.txt
+2026-11-25T03:44:57Z | step 03-after-boot | scripts/03-after-boot.sh | sha256 373e981b8a6782ff289827837b3e4769dcbd81b25e652d868a1986186ac2fd51 | env:  | exit=0 | log-03-after-boot.txt
+2026-11-25T03:45:13Z | step 04-firewall | scripts/02-firewall.sh | sha256 e1251fa43369757d258a5ab01eecd6a40c3a81f2cf9a590feeba5cb6a6c73643 | env: MODE=apply | exit=0 | log-04-firewall.txt
+2026-11-25T03:45:18Z | step 04-deadman | scripts/01-deadman.sh | sha256 4bfea5dd161bd719d07423f4775acd63f25ded3706ae12bb6c4f2d212674025c | env: MODE=arm MINUTES=60 | exit=0 | log-04-deadman.txt
+2026-11-25T03:45:24Z | step 05-start-cube | scripts/05-start-cube.sh | sha256 3a1cece723a2023470e044d78dd38d139ae192be5f1e4ff7b1e6e348cae11912 | env:  | exit=0 | log-05-start-cube.txt
+2026-11-25T03:45:57Z | step 04-firewall | scripts/02-firewall.sh | sha256 e1251fa43369757d258a5ab01eecd6a40c3a81f2cf9a590feeba5cb6a6c73643 | env: MODE=apply | exit=0 | log-04-firewall.txt
+2026-11-25T03:46:03Z | port probe 05-portprobe | tools/portprobe.sh 22 80 443 3000 3010 8080 8082 8083 8089 8443 8890 9000 9090 9966 9998 9999 12088 3306 6379 | log-05-portprobe.txt
+2026-11-25T03:47:39Z | step 06-pvm-project-test | scripts/08-pvm-project-test.sh | sha256 a141e9dc2a4d060c84d200fe59afc14f2e9b2a9844d17611645c3c1cfb2f608d | env:  | exit=1 | log-06-pvm-project-test.txt
+2026-11-25T03:47:56Z | step 07-quickstart | scripts/09-quickstart.sh | sha256 770af1b959dcae6713449ad143e4d7aa1d558f066005f1395e66a38f346ac869 | env:  | exit=2 | log-07-quickstart.txt
+2026-11-25T03:48:45Z | step 07-quickstart | scripts/09-quickstart.sh | sha256 7c7f7cf38e8084b12186dd0e346ad7e38348402430b28e392025a4bfc56600e7 | env:  | exit=0 | log-07-quickstart.txt
+2026-11-25T03:49:00Z | step 08-cycles | scripts/10-cycles.sh | sha256 c11f46c8d436771ce42c2d2e32c84d24ff2a28c08b5eca700215aace02043b03 | env:  | exit=0 | log-08-cycles.txt
+2026-11-25T03:50:07Z | step 09-evidence | scripts/09-evidence.sh | sha256 b2dde9e86d457791ee7e1b065890da7e2a7fd37dd95a53cb87906692be6e2ead | env:  | exit=0 | log-09-evidence.txt
+2026-11-25T03:50:23Z | step 09b-status | scripts/07-status.sh | sha256 55a300904a01cc50bd262036c15b86466226b2ca6d87cdc40e4bb7b4ba018d73 | env: SINCE=2026-11-25 03:45:00 | exit=0 | log-09b-status.txt
+2026-11-25T03:50:30Z | step 10-finish | scripts/10-finish.sh | sha256 1e63b5efcd53b462ac960ae096e616046876a29fb6ee4cb18e1fe7a18cc27ff9 | env:  | exit=0 | log-10-finish.txt
+2026-11-25T03:50:50Z | step 11-reboot-to-pvm-host | scripts/02-reboot.sh | sha256 5de586837af598ffd0054eabb7607d65837b6022cd12368282cec0493b6dfddd | env: ENTRY=e0-pvm-139 | exit=0 | log-11-reboot-to-pvm-host.txt
+2026-11-25T03:50:56Z | wait 11-reboot-to-pvm-host | tools/vmwait.sh | reachable on try 7 at 2026-11-25T03:52:35Z: kernel=6.8.0-139-generic boot_id=<uuid> up_since=2026-11-25T03:52:17 | exit=0 | log-11-reboot-to-pvm-host.txt
+2026-11-25T03:52:35Z | step 11-after-boot-139 | scripts/11-after-boot-139.sh | sha256 0743d4c38cb7e9ff36088711344bc0d2cd7305a728ac16f2edc550a27c3153ab | env: EXPECT=139 | exit=0 | log-11-after-boot-139.txt
+2026-11-25T03:52:59Z | step 12-final | scripts/12-final.sh | sha256 ad8fc381ab5fbc481d6d660d1dbd267e2847ceb4b131b0668099564b3bd9b3de | env:  | exit=1 | log-12-final.txt
+2026-11-25T03:53:06Z | step 12b-kata-smoke | scripts/12b-kata-smoke.sh | sha256 95545c83bf32e9a3c1206b002f383395c9ee3297a46cc4efafda14050ca62c16 | env:  | exit=0 | log-12b-kata-smoke.txt
+2026-11-25T03:53:43Z | step 13-state | scripts/13-state.sh | sha256 87b54af7f77fcf5cc4c463b28f97dbe3fa9feedbabaf13fbc79e5706e8288dea | env:  | exit=0 | log-13-state.txt
+2026-11-25T03:53:50Z | port probe 13-portprobe | tools/portprobe.sh 22 80 443 3000 3010 8080 8089 8443 9000 9998 12088 | log-13-portprobe.txt
+2026-11-25T04:05:57Z | step 14-cleanup-tmp | scripts/14-cleanup-tmp.sh | sha256 90e4285c11d23c7e677595cbf424ba62148c1f112ab588eca57ef47b9fb86ba6 | env:  | exit=1 | log-14-cleanup-tmp.txt
