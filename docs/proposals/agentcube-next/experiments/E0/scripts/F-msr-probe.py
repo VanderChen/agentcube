@@ -1,3 +1,17 @@
+# Copyright The Volcano Authors.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 # E0 supplementary probe F, exactly as it ran on the VM at 2026-11-25T02:28:04Z (python3, as root).
 # Extracted from commands-as-run.txt so that it can be read and reused as a file.
 # It creates a VM and one vCPU, runs no guest code, and reads and writes a few MSRs through KVM.
